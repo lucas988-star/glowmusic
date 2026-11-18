@@ -371,7 +371,7 @@ function showTrack(data) {
     loadTempo(track);
     els.total.textContent = formatTime(track.durationMs);
     if (prefs.upnext) loadQueue();
-    if (prefs.lyrics) loadLyrics(track);
+    loadLyrics(track); // even when hidden: choruses drive the glow
   }
   setArt(images && images[0] ? images[0].url : null);
 }
@@ -401,13 +401,16 @@ async function setArt(url) {
   if (!url) {
     [...els.covers, ...els.bgs].forEach((el) => el.classList.remove('show'));
     setAccent(null);
+    glow.target = DEFAULT_PALETTE;
     return;
   }
   layers.forEach((el) => { el.src = url; });
   await Promise.all(layers.map((el) => el.decode().catch(() => {})));
   if (token !== artToken) return; // a newer track arrived meanwhile
 
-  setAccent(pickAccent(els.covers[back]));
+  const colors = pickColors(els.covers[back]);
+  setAccent(colors && colors.accent);
+  glow.target = colors ? colors.palette : DEFAULT_PALETTE;
   [els.covers, els.bgs].forEach((pair) => {
     pair[back].classList.add('top', 'show');
     pair[view.front].classList.remove('top');
@@ -430,8 +433,13 @@ function rgbToHsl(r, g, b) {
   return [(h * 60 + 360) % 360, s, l];
 }
 
-// Most common vivid hue on the cover, pushed to a bright glow-friendly colour.
-function pickAccent(img) {
+// Colours from the cover: one accent (UI) + a 3-colour "lava" palette for the edge glow.
+// Palette entries are [hue, saturation %, lightness %].
+const DEFAULT_PALETTE = [[95, 100, 67], [150, 80, 60], [60, 90, 65]];
+const hsl = ([h, sat, l]) => `hsl(${h.toFixed(0)} ${sat.toFixed(0)}% ${l.toFixed(0)}%)`;
+const hueGap = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
+
+function pickColors(img) {
   try {
     const size = 32;
     const canvas = document.createElement('canvas');
@@ -449,19 +457,23 @@ function pickAccent(img) {
       const b = buckets[Math.floor(h / 30) % 12];
       b.w += w; b.h += h * w; b.s += s * w; b.l += l * w;
     }
-    const best = buckets.reduce((a, b) => (b.w > a.w ? b : a));
-    if (best.w < size * size * 0.02) {
-      // Black/white/grey cover: soft silver glow, a touch warm or cool like the cover.
+    const ranked = buckets.filter((b) => b.w > 0).sort((a, b) => b.w - a.w)
+      .map((b) => [b.h / b.w, Math.max(b.s / b.w, 0.65) * 100, Math.min(Math.max(b.l / b.w, 0.5), 0.66) * 100, b.w]);
+    if (!ranked.length || ranked[0][3] < size * size * 0.02) {
+      // Black/white/grey cover: silvers, a touch warm or cool like the cover.
       const hue = tintW ? tintH / tintW : 0;
       const light = 78 + (sumL / (size * size)) * 14; // darker cover → dimmer silver
-      return `hsl(${hue.toFixed(0)} ${tintW ? 10 : 0}% ${light.toFixed(0)}%)`;
+      const silver = [hue, tintW ? 10 : 0, light];
+      return { accent: hsl(silver), palette: [silver, [hue, 6, light - 14], [hue, 4, 96]] };
     }
-    const h = best.h / best.w;
-    const s = Math.max(best.s / best.w, 0.65) * 100;
-    const l = Math.min(Math.max(best.l / best.w, 0.55), 0.68) * 100;
-    return `hsl(${h.toFixed(0)} ${s.toFixed(0)}% ${l.toFixed(0)}%)`;
+    const main = ranked[0].slice(0, 3);
+    // Second colour: the next clearly different hue on the cover, else a neighbour of the main one.
+    const other = ranked.find((c) => c[3] > ranked[0][3] * 0.12 && hueGap(c[0], main[0]) >= 45);
+    const second = other ? other.slice(0, 3) : [(main[0] + 40) % 360, main[1], main[2]];
+    const third = [(main[0] + 340) % 360, Math.min(100, main[1] + 10), Math.min(78, main[2] + 14)]; // lighter, warmer
+    return { accent: hsl(main), palette: [main, second, third] };
   } catch {
-    return null; // canvas blocked (no CORS) → keep default colour
+    return null; // canvas blocked (no CORS) → keep default colours
   }
 }
 
@@ -481,33 +493,52 @@ function currentPosition() {
 }
 
 // ---------------------------------------------------------------- glow
-// Three glowing lines around the screen edge that bump on every beat.
-// No audio access on the web, so the beat comes from the song's tempo (ReccoBeats) and
-// its playback position; faster, more energetic songs move harder. Lyric lines and song changes add flashes.
+// Lava-lamp edge: a glowing band that swells into slow, soft blobs which drift around the
+// screen, merge and split, with the cover's colours flowing through them.
+// No audio access on the web, so "how loud" is estimated: the song's energy (ReccoBeats) and
+// its shape (calm intro, bigger in repeated parts = choruses, softer outro, from synced lyrics).
 const glowEls = [document.querySelector('.artglow')];
 const calm = matchMedia('(prefers-reduced-motion: reduce)');
 const band = $('glowband');
 const ctx = band.getContext('2d');
-const SAMPLES = 260;              // points per line
+const SAMPLES = 240;              // points around the edge
 const RADIUS = 40;                // corner rounding (matches .edge)
 const MARGIN = 12;                // same inset as .edge
-const LINES = [                   // depth from the frame, width, opacity
-  { depth: 2, width: 2, alpha: 0.95, core: true },
-  { depth: 11, width: 1.4, alpha: 0.6 },
-  { depth: 21, width: 1, alpha: 0.32 },
-];
-const glow = {
-  kick: 0,                        // flash strength, fades out
-  bpm: 0,                         // 0 = tempo unknown
-  songEnergy: 0.5,                // 0 (calm) – 1 (loud, intense)
-  switchAt: -1e9,                 // when the last song change happened (ms)
-  phases: [0, 0, 0].map(() => Math.random() * Math.PI * 2),
-  color: '#aaff59',
-  colorAt: 0,
-  last: 0,
-  time: 0,
-  sparks: [],
+// Glow styles to choose from (?glow=lava|ribbon|neon|dream).
+const GLOW_STYLES = {
+  lava:   { base: 5, grow: 26, max: 38, blobs: 8, width: [0.012, 0.042], flow: 0.35, shadow: 14, gloss: 0.35, alpha: 0.85 },
+  ribbon: { base: 2, grow: 11, max: 16, blobs: 16, width: [0.005, 0.016], flow: 0.9, shadow: 10, gloss: 0.5, alpha: 0.9 },
+  neon:   { base: 2, grow: 20, max: 32, blobs: 5, width: [0.025, 0.06], flow: 0.2, shadow: 26, gloss: 0, alpha: 0.3, neon: true },
+  dream:  { base: 7, grow: 30, max: 38, blobs: 7, width: [0.02, 0.05], flow: 0.25, shadow: 24, gloss: 0, alpha: 0.75, blur: 7 },
 };
+const STYLE = GLOW_STYLES[new URLSearchParams(location.search).get('glow')] || GLOW_STYLES.lava;
+const MAX_DEPTH = STYLE.max;      // keep blobs out of the corners' centre
+const glow = {
+  bpm: 0,                         // 0 = tempo unknown
+  songEnergy: 0.5,                // 0 (calm) – 1 (loud), whole song
+  structure: null,                // from songStructure()
+  level: 0.3,                     // smoothed "loudness" 0–1
+  surge: 0,                       // extra swell when the song gets bigger, fades out
+  switchAt: -1e9,                 // when the last song change happened (ms)
+  palette: DEFAULT_PALETTE.map((c) => c.slice()),
+  target: DEFAULT_PALETTE,
+  flow: 0,                        // how far the colours have flowed around (radians)
+  last: 0,
+  blobs: [],
+};
+
+function newBlob() {
+  return {
+    u: Math.random(),                          // position around the edge (0–1)
+    v: (Math.random() - 0.5) * 0.012,          // drift speed
+    size: 0.4 + Math.random() * 0.6,
+    width: STYLE.width[0] + Math.random() * (STYLE.width[1] - STYLE.width[0]), // how long the blob is
+    phase: Math.random() * Math.PI * 2,
+    rate: 0.15 + Math.random() * 0.35,         // how fast it grows and shrinks
+  };
+}
+for (let i = 0; i < STYLE.blobs; i++) glow.blobs.push(newBlob());
+if (STYLE.blur) band.style.filter = `blur(${STYLE.blur}px)`;
 
 function resizeGlow() {
   band.width = innerWidth;
@@ -516,12 +547,11 @@ function resizeGlow() {
 addEventListener('resize', resizeGlow);
 resizeGlow();
 
-// New song: a wave of light, a flash, new random bumps and a burst of sparks.
+// New song: a big lava wave races from the top down both sides, and the blobs reshuffle.
 function songChanged() {
   glow.switchAt = performance.now();
-  glow.kick = 1.6;
-  glow.phases = glow.phases.map(() => Math.random() * Math.PI * 2);
-  glow.sparks.forEach((p) => { p.life = Math.random() * 0.3; p.speed *= 3; });
+  glow.surge = 1;
+  glow.blobs.forEach((b) => { b.v = (Math.random() - 0.5) * 0.03; b.phase = Math.random() * Math.PI * 2; });
 }
 
 // Point on the rounded frame at fraction u (0–1, clockwise from the top) + inward direction.
@@ -543,25 +573,41 @@ function edgePoint(u, w, h) {
   return arc(m + r, m + r, Math.PI);
 }
 
-// How far line k sits from the frame at u: its depth + beat bumps + the song-change wave.
-function lineOffset(k, u, t, amp, now, w, h) {
-  const TAU = Math.PI * 2;
-  const [a, b, c] = glow.phases;
-  const wave = 0.5 * Math.sin(TAU * 3 * u + a + t * 0.8 + k)
-    + 0.3 * Math.sin(TAU * 7 * u + b - t * 1.3 + 2 * k)
-    + 0.2 * Math.sin(TAU * 13 * u + c + t * 2.1 - k);
-  let off = LINES[k].depth + amp * (1 + wave) * (1 - 0.15 * k);
+// Estimated loudness 0–1 at this point of the song.
+function songLevel(pos) {
+  const base = 0.3 + 0.7 * glow.songEnergy;
+  const st = glow.structure;
+  let part;
+  if (st) {
+    if (pos < st.start - 500) part = 0.3;                       // intro
+    else if (pos > st.end) part = 0.4;                           // outro
+    else part = st.loud.some(([a, b]) => pos >= a && pos < b) ? 1 : 0.62; // chorus / verse
+  } else {
+    const p = playback.durationMs ? pos / playback.durationMs : 0.5;
+    part = p < 0.08 ? 0.3 + p * 5 : p > 0.93 ? 0.4 : 0.72;     // no lyrics: just intro/outro
+  }
+  return Math.min(1, base * part);
+}
+
+const circ = (a, b) => { const d = Math.abs(a - b) % 1; return Math.min(d, 1 - d); };
+
+// How far the lava reaches in from the frame at u.
+function lavaDepth(u, swell, now, w, h) {
+  let d = 2.5;
+  for (const b of glow.blobs) {
+    const x = circ(u, b.u) / b.width;
+    d += swell * b.cur * Math.exp(-x * x * 0.5);
+  }
   const since = (now - glow.switchAt) / 1000;
-  if (since < 2.5) { // two bumps race from the top centre down both sides
+  if (since < 3) { // song change: two blobs race from the top centre down both sides
     const W = w - 2 * MARGIN - 2 * RADIUS, H = h - 2 * MARGIN - 2 * RADIUS;
     const top = (W / 2) / (2 * (W + H) + 2 * Math.PI * RADIUS);
     for (const dir of [1, -1]) {
-      let dist = Math.abs(u - (top + dir * since * 0.42)) % 1;
-      dist = Math.min(dist, 1 - dist);
-      off += 46 * Math.exp(-since * 1.3) * Math.exp(-(dist * dist) / 0.0018);
+      const x = circ(u, top + dir * since * 0.3) / 0.035;
+      d += 30 * Math.exp(-since * 0.9) * Math.exp(-x * x * 0.5);
     }
   }
-  return off;
+  return Math.min(MAX_DEPTH, d);
 }
 
 function drawGlow(now) {
@@ -570,67 +616,84 @@ function drawGlow(now) {
   const w = band.width, h = band.height;
   const playing = playback.isPlaying && !calm.matches;
 
-  // Beat: tempo + song position. Unknown tempo → a gentle 100 BPM.
-  const bpm = glow.bpm || 100;
-  const energy = Math.min(1, Math.max(0.3, (bpm - 60) / 100)) * (glow.bpm ? 0.5 + glow.songEnergy : 0.6);
-  const beats = (currentPosition() / 1000) * (bpm / 60);
-  const hit = playing ? Math.exp(-(beats - Math.floor(beats)) * 7) : 0; // 1 on the beat, fades fast
-  glow.kick *= Math.exp(-dt * 2.5);
+  // Loudness: rise fairly quickly (a drop/chorus kicks in), fall slowly.
+  const target = playing ? songLevel(currentPosition()) : 0.12;
+  if (target > glow.level + 0.2) glow.surge = Math.max(glow.surge, target - glow.level); // the song just got bigger
+  glow.level += (target - glow.level) * (1 - Math.exp(-dt * (target > glow.level ? 1.2 : 0.4)));
+  glow.surge *= Math.exp(-dt * 0.7);
+  const level = Math.min(1.3, glow.level + glow.surge * 0.8);
+  const tempo = Math.min(1.4, Math.max(0.7, (glow.bpm || 110) / 110));
 
-  if (!calm.matches) glow.time += dt * (playing ? 0.6 + 2.6 * hit * energy : 0.25); // lurch forward on beats
-  const t = glow.time;
-  const amp = 3 + (playing ? 24 * hit * energy + 10 * glow.kick : 0);
-  const pulse = Math.min(1, 0.3 + 0.6 * hit * energy + 0.3 * glow.kick).toFixed(3);
-  glowEls.forEach((el) => el.style.setProperty('--pulse', pulse));
-
-  // Read the (smoothly changing) album colour a few times per second.
-  if (now - glow.colorAt > 120) {
-    glow.color = getComputedStyle(els.screen).getPropertyValue('--accent').trim() || DEFAULT_ACCENT;
-    glow.colorAt = now;
+  // Blobs drift, grow and shrink — slow when calm, livelier when loud.
+  const pace = calm.matches ? 0 : dt * (0.25 + 1.6 * level) * tempo;
+  for (const b of glow.blobs) {
+    b.phase += pace * b.rate * 2;
+    b.u = (b.u + b.v * pace * 3 + 1) % 1;
+    b.v += (Math.random() - 0.5) * 0.004 * pace;                // wander
+    b.v = Math.max(-0.02, Math.min(0.02, b.v));
+    b.cur = b.size * Math.max(0, 0.15 + 0.85 * Math.sin(b.phase)); // 0 = blob has melted back in
   }
+  const swell = STYLE.base + STYLE.grow * level;
 
-  const strength = els.screen.classList.contains('is-playing') ? 1 : 0.5;
-  ctx.clearRect(0, 0, w, h);
-  ctx.lineJoin = 'round';
-  ctx.shadowColor = glow.color;
-  LINES.forEach((line, k) => {
-    ctx.beginPath();
-    for (let i = 0; i <= SAMPLES; i++) {
-      const u = i / SAMPLES;
-      const [x, y, nx, ny] = edgePoint(u, w, h);
-      const off = lineOffset(k, u, t, amp, now, w, h);
-      if (i) ctx.lineTo(x + nx * off, y + ny * off); else ctx.moveTo(x + nx * off, y + ny * off);
-    }
-    ctx.strokeStyle = line.core ? '#fff' : glow.color;
-    ctx.globalAlpha = Math.min(1, line.alpha * strength * (0.8 + 0.4 * hit + 0.3 * glow.kick));
-    ctx.lineWidth = line.width + (line.core ? 1.5 * hit * energy : 0);
-    ctx.shadowBlur = 10 + 14 * hit * energy;
-    ctx.stroke();
+  // Colours slide toward the new cover's palette and flow around the edge.
+  glow.palette.forEach((c, i) => {
+    const t = glow.target[i];
+    const k = 1 - Math.exp(-dt * 1.5);
+    let dh = ((t[0] - c[0] + 540) % 360) - 180;                   // shortest way round the colour wheel
+    c[0] = (c[0] + dh * k + 360) % 360; c[1] += (t[1] - c[1]) * k; c[2] += (t[2] - c[2]) * k;
   });
-  ctx.shadowBlur = 0;
-  drawSparks(dt, w, h, t, amp, now, strength, hit);
-  ctx.globalAlpha = 1;
-}
+  glow.flow += pace * STYLE.flow;
+  glowEls.forEach((el) => el.style.setProperty('--pulse', Math.min(1, 0.25 + 0.6 * level).toFixed(3)));
 
-// Little specks of light floating between the lines.
-function drawSparks(dt, w, h, t, amp, now, strength, hit) {
-  if (!glow.sparks.length) {
-    for (let i = 0; i < 40; i++) glow.sparks.push({ life: Math.random(), u: 0, off: 0, speed: 0, size: 0 });
+  // Lava shape: the ring between the frame and the wobbly inner edge.
+  const outer = [], inner = [];
+  for (let i = 0; i < SAMPLES; i++) {
+    const u = i / SAMPLES;
+    const [x, y, nx, ny] = edgePoint(u, w, h);
+    const d = lavaDepth(u, swell, now, w, h);
+    outer.push([x - nx, y - ny]);
+    inner.push([x + nx * d, y + ny * d]);
   }
-  if (calm.matches) return;
-  ctx.fillStyle = '#fff';
-  for (const p of glow.sparks) {
-    p.life += dt * (0.3 + 0.6 * hit);
-    if (p.life >= 1) Object.assign(p, { life: 0, u: Math.random(), off: Math.random(), speed: (Math.random() - 0.5) * 0.02, size: 0.6 + Math.random() * 1.2 });
-    p.u += p.speed * dt;
-    p.speed *= Math.exp(-dt * 0.5);
-    const [x, y, nx, ny] = edgePoint(p.u, w, h);
-    const off = lineOffset(1, p.u, t, amp, now, w, h) + (p.off - 0.5) * 14;
-    ctx.globalAlpha = Math.sin(p.life * Math.PI) * (0.5 + 0.5 * hit) * strength;
+  const trace = (pts) => pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+
+  let fill;
+  if (ctx.createConicGradient) {
+    fill = ctx.createConicGradient(glow.flow, w / 2, h / 2);
+    const [a, b, c] = glow.palette.map(hsl);
+    [[0, a], [0.2, b], [0.4, c], [0.6, a], [0.8, b], [1, a]].forEach(([o, col]) => fill.addColorStop(o, col));
+  } else {
+    fill = hsl(glow.palette[0]);
+  }
+  const strength = els.screen.classList.contains('is-playing') ? 1 : 0.55;
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, STYLE.alpha + 0.2 * level) * strength;
+  ctx.shadowColor = hsl(glow.palette[0]);
+  ctx.shadowBlur = STYLE.shadow + 22 * level;
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  trace(outer); ctx.closePath();
+  trace(inner); ctx.closePath();
+  ctx.fill('evenodd');
+  if (STYLE.neon) { // bright tube along the blob outline
+    ctx.globalAlpha = strength;
+    ctx.strokeStyle = fill;
+    ctx.lineWidth = 2.5 + 1.5 * level;
     ctx.beginPath();
-    ctx.arc(x + nx * off, y + ny * off, p.size, 0, Math.PI * 2);
-    ctx.fill();
+    trace(inner); ctx.closePath();
+    ctx.stroke();
   }
+  if (STYLE.gloss) { // glossy edge on the blobs, like light on wax
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = STYLE.gloss * strength;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    trace(inner); ctx.closePath();
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 // Song tempo + energy from ReccoBeats (free, no key, uses the Spotify track id). Cached per song.
@@ -822,8 +885,28 @@ function lyricsNote(text) {
   lyr.lines = [];
 }
 
+// Rough song shape from synced lyrics: when singing starts/ends, and where lines repeat
+// (choruses — usually the loudest parts). Returns times in ms.
+function songStructure(lines) {
+  const sung = lines.filter((l) => l.text);
+  if (sung.length < 4) return null;
+  const key = (t) => t.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, '').trim();
+  const count = new Map();
+  sung.forEach((l) => { const k = key(l.text); if (k.length > 3) count.set(k, (count.get(k) || 0) + 1); });
+  const loud = [];
+  lines.forEach((l, i) => {
+    if (!l.text || (count.get(key(l.text)) || 0) < 2) return;
+    const end = lines[i + 1] ? lines[i + 1].t : l.t + 4000;
+    const last = loud[loud.length - 1];
+    if (last && l.t - last[1] < 6000) last[1] = end; else loud.push([l.t, end]);
+  });
+  return { start: sung[0].t, end: sung[sung.length - 1].t + 4000, loud };
+}
+console.assert(JSON.stringify(songStructure(parseLrc('[00:10]verse one\n[00:20]la la chorus\n[00:24]verse two\n[00:30]more verse\n[00:40]la la chorus\n[00:44]end'))) === '{"start":10000,"end":48000,"loud":[[20000,24000],[40000,44000]]}', 'songStructure');
+
 async function loadLyrics(track) {
   lyr.id = track.id;
+  glow.structure = null;
   if (track.isEpisode) { lyricsNote('No lyrics for podcasts'); return; }
   lyricsNote('Loading lyrics…');
   let result;
@@ -841,6 +924,7 @@ async function loadLyrics(track) {
   }));
   els.lyrlist.classList.toggle('plain', !result.synced);
   Object.assign(lyr, { lines: result.lines, synced: result.synced, idx: -1, maxScroll: 0 });
+  if (result.synced) glow.structure = songStructure(result.lines);
   els.lyrlist.style.transform = '';
   requestAnimationFrame(() => { lyr.maxScroll = Math.max(0, els.lyrlist.scrollHeight - els.lyrwin.clientHeight); });
 }
@@ -859,7 +943,7 @@ function updateLyrics(pos) {
   if (nodes[lyr.idx]) nodes[lyr.idx].classList.remove('active');
   lyr.idx = idx;
   const active = nodes[Math.max(idx, 0)];
-  if (idx >= 0) { active.classList.add('active'); glow.kick = Math.max(glow.kick, 1); }
+  if (idx >= 0) active.classList.add('active');
   // Centre the current line in the window.
   const y = active.offsetTop + active.offsetHeight / 2 - els.lyrwin.clientHeight / 2;
   els.lyrlist.style.transform = `translateY(${-Math.max(0, y)}px)`;
