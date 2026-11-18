@@ -15,7 +15,8 @@ login uses Spotify's *Authorization Code with PKCE* flow in the browser.
 
 **Features:** clock, current song with big cover, glow in the cover's colour,
 live progress bar, play/pause/previous/next (Spotify Premium), "Up next" panel,
-synced lyrics (from [LRCLIB](https://lrclib.net)), wallpaper and screen saver modes.
+synced lyrics (from [LRCLIB](https://lrclib.net)), an edge glow that bumps to the beat
+(tempo from [ReccoBeats](https://reccobeats.com)), wallpaper and screen saver modes.
 
 Buttons at the top right: **Up next** and **Lyrics** turn the panels on/off
 (remembered), **Screen saver link** is explained in section 4.

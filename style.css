@@ -395,7 +395,7 @@ html, body {
 .screen.mode-screensaver .loginbtn { display: none; }
 .screen.mode-screensaver { cursor: none; }
 
-/* Required credit for the GetSongBPM tempo data */
+/* Credit for the tempo data */
 .credit { position: absolute; right: 26px; bottom: 22px; font-size: 10px; letter-spacing: .08em; color: #e6eee266; text-decoration: none; }
 .credit:hover { color: #e6eee2cc; }
 

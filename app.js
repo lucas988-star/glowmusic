@@ -482,9 +482,8 @@ function currentPosition() {
 
 // ---------------------------------------------------------------- glow
 // Three glowing lines around the screen edge that bump on every beat.
-// No audio access on the web, so the beat comes from the song's tempo (GetSongBPM) and
-// its playback position; faster songs move harder. Lyric lines and song changes add flashes.
-const GETSONGBPM_KEY = ''; // paste your key from getsongbpm.com here
+// No audio access on the web, so the beat comes from the song's tempo (ReccoBeats) and
+// its playback position; faster, more energetic songs move harder. Lyric lines and song changes add flashes.
 const glowEls = [document.querySelector('.artglow')];
 const calm = matchMedia('(prefers-reduced-motion: reduce)');
 const band = $('glowband');
@@ -500,6 +499,7 @@ const LINES = [                   // depth from the frame, width, opacity
 const glow = {
   kick: 0,                        // flash strength, fades out
   bpm: 0,                         // 0 = tempo unknown
+  songEnergy: 0.5,                // 0 (calm) – 1 (loud, intense)
   switchAt: -1e9,                 // when the last song change happened (ms)
   phases: [0, 0, 0].map(() => Math.random() * Math.PI * 2),
   color: '#aaff59',
@@ -572,7 +572,7 @@ function drawGlow(now) {
 
   // Beat: tempo + song position. Unknown tempo → a gentle 100 BPM.
   const bpm = glow.bpm || 100;
-  const energy = Math.min(1, Math.max(0.3, (bpm - 60) / 100)) * (glow.bpm ? 1 : 0.6);
+  const energy = Math.min(1, Math.max(0.3, (bpm - 60) / 100)) * (glow.bpm ? 0.5 + glow.songEnergy : 0.6);
   const beats = (currentPosition() / 1000) * (bpm / 60);
   const hit = playing ? Math.exp(-(beats - Math.floor(beats)) * 7) : 0; // 1 on the beat, fades fast
   glow.kick *= Math.exp(-dt * 2.5);
@@ -633,28 +633,28 @@ function drawSparks(dt, w, h, t, amp, now, strength, hit) {
   }
 }
 
-// Song tempo from GetSongBPM (needs GETSONGBPM_KEY). Cached per song.
+// Song tempo + energy from ReccoBeats (free, no key, uses the Spotify track id). Cached per song.
 const tempoCache = new Map();
 async function loadTempo(track) {
   glow.bpm = 0;
-  if (!GETSONGBPM_KEY || track.isEpisode) return;
+  glow.songEnergy = 0.5;
+  if (track.isEpisode || !/^[A-Za-z0-9]{22}$/.test(track.id)) return;
   if (!tempoCache.has(track.id)) {
-    const name = track.name.replace(/\s*[([].*?[)\]]/g, '').replace(/\s+-\s+.*$/, ''); // drop "(feat. …)", "- Remastered"
-    const query = new URLSearchParams({ api_key: GETSONGBPM_KEY, type: 'both', lookup: `song:${name} artist:${track.firstArtist}` });
-    const p = fetch(`https://api.getsong.co/search/?${query}`)
+    const p = fetch(`https://api.reccobeats.com/v1/audio-features?ids=${track.id}`)
       .then((res) => (res.ok ? res.json() : {}))
       .then((data) => {
-        const list = Array.isArray(data.search) ? data.search : [];
-        const artist = track.firstArtist.toLowerCase();
-        const best = list.find((x) => x.artist && String(x.artist.name).toLowerCase() === artist) || list[0];
-        return best ? parseFloat(best.tempo) || 0 : 0;
+        const f = data.content && data.content[0];
+        return f ? { bpm: Number(f.tempo) || 0, energy: Number(f.energy) || 0.5 } : null;
       });
     p.catch(() => tempoCache.delete(track.id)); // offline: try again next time
     tempoCache.set(track.id, p);
   }
   try {
-    const bpm = await tempoCache.get(track.id);
-    if (view.track && view.track.id === track.id) glow.bpm = bpm;
+    const info = await tempoCache.get(track.id);
+    if (info && view.track && view.track.id === track.id) {
+      glow.bpm = info.bpm;
+      glow.songEnergy = info.energy;
+    }
   } catch { /* keep the default rhythm */ }
 }
 
