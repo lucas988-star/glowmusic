@@ -368,6 +368,7 @@ function showTrack(data) {
     const sub = track.album ? `${track.artist}  ·  ${track.album}` : track.artist;
     setTrackText(track.name, sub);
     songChanged();
+    loadTempo(track);
     els.total.textContent = formatTime(track.durationMs);
     if (prefs.upnext) loadQueue();
     if (prefs.lyrics) loadLyrics(track);
@@ -480,22 +481,27 @@ function currentPosition() {
 }
 
 // ---------------------------------------------------------------- glow
-// No audio access on the web, so the glow "reacts" to what we do know about the song:
-// every new lyric line gives a flash, a new song sends a wave of light around the screen,
-// and in between the band wobbles with random bumps.
+// Three glowing lines around the screen edge that bump on every beat.
+// No audio access on the web, so the beat comes from the song's tempo (GetSongBPM) and
+// its playback position; faster songs move harder. Lyric lines and song changes add flashes.
+const GETSONGBPM_KEY = ''; // paste your key from getsongbpm.com here
 const glowEls = [document.querySelector('.artglow')];
 const calm = matchMedia('(prefers-reduced-motion: reduce)');
 const band = $('glowband');
-const sparkCanvas = $('sparks');
-const bandCtx = band.getContext('2d');
-const sparkCtx = sparkCanvas.getContext('2d');
-const SCALE = 0.5;          // draw at half resolution; the CSS blur hides it
-const SAMPLES = 180;        // points around the edge
+const ctx = band.getContext('2d');
+const SAMPLES = 260;              // points per line
+const RADIUS = 40;                // corner rounding (matches .edge)
+const MARGIN = 12;                // same inset as .edge
+const LINES = [                   // depth from the frame, width, opacity
+  { depth: 2, width: 2, alpha: 0.95, core: true },
+  { depth: 11, width: 1.4, alpha: 0.6 },
+  { depth: 21, width: 1, alpha: 0.32 },
+];
 const glow = {
-  kick: 0,                  // flash strength, fades out
-  pulse: 0.4,
-  switchAt: -1e9,           // when the last song change happened (ms)
-  phases: [0, 0, 0, 0].map(() => Math.random() * Math.PI * 2),
+  kick: 0,                        // flash strength, fades out
+  bpm: 0,                         // 0 = tempo unknown
+  switchAt: -1e9,                 // when the last song change happened (ms)
+  phases: [0, 0, 0].map(() => Math.random() * Math.PI * 2),
   color: '#aaff59',
   colorAt: 0,
   last: 0,
@@ -504,10 +510,8 @@ const glow = {
 };
 
 function resizeGlow() {
-  for (const c of [band, sparkCanvas]) {
-    c.width = Math.round(innerWidth * SCALE);
-    c.height = Math.round(innerHeight * SCALE);
-  }
+  band.width = innerWidth;
+  band.height = innerHeight;
 }
 addEventListener('resize', resizeGlow);
 resizeGlow();
@@ -520,58 +524,64 @@ function songChanged() {
   glow.sparks.forEach((p) => { p.life = Math.random() * 0.3; p.speed *= 3; });
 }
 
-// Point on the edge rectangle at fraction u (0–1, clockwise from top-left) + inward direction.
-function edgePoint(u, w, h, m) {
-  const W = w - 2 * m, H = h - 2 * m, P = 2 * (W + H);
-  let d = (((u % 1) + 1) % 1) * P;
-  if (d < W) return [m + d, m, 0, 1];
-  d -= W;
-  if (d < H) return [w - m, m + d, -1, 0];
-  d -= H;
-  if (d < W) return [w - m - d, h - m, 0, -1];
-  d -= W;
-  return [m, h - m - d, 1, 0];
+// Point on the rounded frame at fraction u (0–1, clockwise from the top) + inward direction.
+function edgePoint(u, w, h) {
+  const m = MARGIN, r = RADIUS;
+  const W = w - 2 * m - 2 * r, H = h - 2 * m - 2 * r, A = (Math.PI * r) / 2;
+  let d = (((u % 1) + 1) % 1) * (2 * (W + H) + 4 * A);
+  const arc = (cx, cy, a0) => {
+    const a = a0 + d / r;
+    return [cx + Math.cos(a) * r, cy + Math.sin(a) * r, -Math.cos(a), -Math.sin(a)];
+  };
+  if (d < W) return [m + r + d, m, 0, 1]; d -= W;
+  if (d < A) return arc(w - m - r, m + r, -Math.PI / 2); d -= A;
+  if (d < H) return [w - m, m + r + d, -1, 0]; d -= H;
+  if (d < A) return arc(w - m - r, h - m - r, 0); d -= A;
+  if (d < W) return [w - m - r - d, h - m, 0, -1]; d -= W;
+  if (d < A) return arc(m + r, h - m - r, Math.PI / 2); d -= A;
+  if (d < H) return [m, h - m - r - d, 1, 0]; d -= H;
+  return arc(m + r, m + r, Math.PI);
 }
 
-function bandDepth(u, t, base, now) {
-  const [a, b, c, e] = glow.phases;
+// How far line k sits from the frame at u: its depth + beat bumps + the song-change wave.
+function lineOffset(k, u, t, amp, now, w, h) {
   const TAU = Math.PI * 2;
-  // Bumps: a few overlapping waves that drift at different speeds (wraps seamlessly).
-  let wobble = 1
-    + 0.42 * Math.sin(TAU * 3 * u + a + t * 0.55)
-    + 0.30 * Math.sin(TAU * 7 * u + b - t * 0.9)
-    + 0.20 * Math.sin(TAU * 13 * u + c + t * 1.7)
-    + 0.12 * Math.sin(TAU * 23 * u + e - t * 2.6);
-  wobble = Math.max(0.15, wobble);
-  let depth = base * wobble * (0.45 + 1.1 * glow.pulse);
-  // Song change: two bumps race from the top centre around both sides.
+  const [a, b, c] = glow.phases;
+  const wave = 0.5 * Math.sin(TAU * 3 * u + a + t * 0.8 + k)
+    + 0.3 * Math.sin(TAU * 7 * u + b - t * 1.3 + 2 * k)
+    + 0.2 * Math.sin(TAU * 13 * u + c + t * 2.1 - k);
+  let off = LINES[k].depth + amp * (1 + wave) * (1 - 0.15 * k);
   const since = (now - glow.switchAt) / 1000;
-  if (since < 2.5) {
-    const top = 0.5 * (band.width - 2 * 6) / (2 * (band.width + band.height - 4 * 6)); // u of top centre
+  if (since < 2.5) { // two bumps race from the top centre down both sides
+    const W = w - 2 * MARGIN - 2 * RADIUS, H = h - 2 * MARGIN - 2 * RADIUS;
+    const top = (W / 2) / (2 * (W + H) + 2 * Math.PI * RADIUS);
     for (const dir of [1, -1]) {
-      const pos = top + dir * since * 0.42;
-      let dist = Math.abs(u - pos) % 1;
+      let dist = Math.abs(u - (top + dir * since * 0.42)) % 1;
       dist = Math.min(dist, 1 - dist);
-      depth += base * 4 * Math.exp(-since * 1.3) * Math.exp(-(dist * dist) / 0.0022);
+      off += 46 * Math.exp(-since * 1.3) * Math.exp(-(dist * dist) / 0.0018);
     }
   }
-  return depth;
+  return off;
 }
 
 function drawGlow(now) {
   const dt = Math.min(0.1, (now - glow.last) / 1000);
   glow.last = now;
-  const w = band.width, h = band.height, m = 6; // the visible frame is inset 12px (= 6 at half size)
+  const w = band.width, h = band.height;
   const playing = playback.isPlaying && !calm.matches;
-  if (!calm.matches) glow.time += dt * (playing ? 1 : 0.35); // slower when paused/idle, no jumps
-  const t = glow.time;
 
-  // How strong the glow is right now.
+  // Beat: tempo + song position. Unknown tempo → a gentle 100 BPM.
+  const bpm = glow.bpm || 100;
+  const energy = Math.min(1, Math.max(0.3, (bpm - 60) / 100)) * (glow.bpm ? 1 : 0.6);
+  const beats = (currentPosition() / 1000) * (bpm / 60);
+  const hit = playing ? Math.exp(-(beats - Math.floor(beats)) * 7) : 0; // 1 on the beat, fades fast
   glow.kick *= Math.exp(-dt * 2.5);
-  const drift = 0.45 + 0.22 * Math.sin(t * 1.3) * Math.sin(t * 0.41 + 1) + 0.1 * Math.sin(t * 3.1);
-  glow.pulse = playing ? Math.min(1.3, drift + glow.kick * 0.7) : 0.25;
-  const pulseCss = Math.min(1, glow.pulse).toFixed(3);
-  glowEls.forEach((el) => el.style.setProperty('--pulse', pulseCss));
+
+  if (!calm.matches) glow.time += dt * (playing ? 0.6 + 2.6 * hit * energy : 0.25); // lurch forward on beats
+  const t = glow.time;
+  const amp = 3 + (playing ? 24 * hit * energy + 10 * glow.kick : 0);
+  const pulse = Math.min(1, 0.3 + 0.6 * hit * energy + 0.3 * glow.kick).toFixed(3);
+  glowEls.forEach((el) => el.style.setProperty('--pulse', pulse));
 
   // Read the (smoothly changing) album colour a few times per second.
   if (now - glow.colorAt > 120) {
@@ -579,58 +589,73 @@ function drawGlow(now) {
     glow.colorAt = now;
   }
 
-  // Band: everything between the screen edge and a wobbly inner line.
-  const base = Math.min(w, h) * 0.035;
-  const pts = [];
-  for (let i = 0; i < SAMPLES; i++) {
-    const u = i / SAMPLES;
-    const [x, y, nx, ny] = edgePoint(u, w, h, m);
-    const d = bandDepth(u, t, base, now);
-    pts.push([x, y, nx, ny, d]);
-  }
-  bandCtx.clearRect(0, 0, w, h);
-  const layer = (scale, alpha) => {
-    bandCtx.beginPath();
-    bandCtx.rect(0, 0, w, h);
-    pts.forEach(([x, y, nx, ny, d], i) => {
-      const px = x + nx * d * scale, py = y + ny * d * scale;
-      if (i) bandCtx.lineTo(px, py); else bandCtx.moveTo(px, py);
-    });
-    bandCtx.closePath();
-    bandCtx.globalAlpha = alpha;
-    bandCtx.fill('evenodd');
-  };
-  const strength = els.screen.classList.contains('is-playing') ? 1 : 0.45;
-  bandCtx.fillStyle = glow.color;
-  layer(1, 0.5 * strength);                         // soft outer glow
-  bandCtx.fillStyle = '#fff';
-  layer(0.28, (0.35 + 0.35 * Math.min(1, glow.kick)) * strength); // bright core near the edge
-  bandCtx.globalAlpha = 1;
-
-  drawSparks(dt, w, h, m, t, base, now, strength);
+  const strength = els.screen.classList.contains('is-playing') ? 1 : 0.5;
+  ctx.clearRect(0, 0, w, h);
+  ctx.lineJoin = 'round';
+  ctx.shadowColor = glow.color;
+  LINES.forEach((line, k) => {
+    ctx.beginPath();
+    for (let i = 0; i <= SAMPLES; i++) {
+      const u = i / SAMPLES;
+      const [x, y, nx, ny] = edgePoint(u, w, h);
+      const off = lineOffset(k, u, t, amp, now, w, h);
+      if (i) ctx.lineTo(x + nx * off, y + ny * off); else ctx.moveTo(x + nx * off, y + ny * off);
+    }
+    ctx.strokeStyle = line.core ? '#fff' : glow.color;
+    ctx.globalAlpha = Math.min(1, line.alpha * strength * (0.8 + 0.4 * hit + 0.3 * glow.kick));
+    ctx.lineWidth = line.width + (line.core ? 1.5 * hit * energy : 0);
+    ctx.shadowBlur = 10 + 14 * hit * energy;
+    ctx.stroke();
+  });
+  ctx.shadowBlur = 0;
+  drawSparks(dt, w, h, t, amp, now, strength, hit);
+  ctx.globalAlpha = 1;
 }
 
-// Little specks of light floating in the glow band.
-function drawSparks(dt, w, h, m, t, base, now, strength) {
+// Little specks of light floating between the lines.
+function drawSparks(dt, w, h, t, amp, now, strength, hit) {
   if (!glow.sparks.length) {
-    for (let i = 0; i < 46; i++) glow.sparks.push({ life: Math.random(), u: 0, off: 0, speed: 0, size: 0 });
+    for (let i = 0; i < 40; i++) glow.sparks.push({ life: Math.random(), u: 0, off: 0, speed: 0, size: 0 });
   }
-  sparkCtx.clearRect(0, 0, w, h);
   if (calm.matches) return;
-  sparkCtx.fillStyle = '#fff';
+  ctx.fillStyle = '#fff';
   for (const p of glow.sparks) {
-    p.life += dt * (0.25 + 0.5 * glow.pulse);
-    if (p.life >= 1) Object.assign(p, { life: 0, u: Math.random(), off: Math.random(), speed: (Math.random() - 0.5) * 0.02, size: 0.5 + Math.random() * 1.1 });
+    p.life += dt * (0.3 + 0.6 * hit);
+    if (p.life >= 1) Object.assign(p, { life: 0, u: Math.random(), off: Math.random(), speed: (Math.random() - 0.5) * 0.02, size: 0.6 + Math.random() * 1.2 });
     p.u += p.speed * dt;
     p.speed *= Math.exp(-dt * 0.5);
-    const [x, y, nx, ny] = edgePoint(p.u, w, h, m);
-    const d = bandDepth(p.u, t, base, now) * (0.2 + p.off * 1.1);
-    sparkCtx.globalAlpha = Math.sin(p.life * Math.PI) * (0.4 + 0.6 * Math.min(1, glow.pulse)) * strength;
-    sparkCtx.beginPath();
-    sparkCtx.arc(x + nx * d, y + ny * d, p.size, 0, Math.PI * 2);
-    sparkCtx.fill();
+    const [x, y, nx, ny] = edgePoint(p.u, w, h);
+    const off = lineOffset(1, p.u, t, amp, now, w, h) + (p.off - 0.5) * 14;
+    ctx.globalAlpha = Math.sin(p.life * Math.PI) * (0.5 + 0.5 * hit) * strength;
+    ctx.beginPath();
+    ctx.arc(x + nx * off, y + ny * off, p.size, 0, Math.PI * 2);
+    ctx.fill();
   }
-  sparkCtx.globalAlpha = 1;
+}
+
+// Song tempo from GetSongBPM (needs GETSONGBPM_KEY). Cached per song.
+const tempoCache = new Map();
+async function loadTempo(track) {
+  glow.bpm = 0;
+  if (!GETSONGBPM_KEY || track.isEpisode) return;
+  if (!tempoCache.has(track.id)) {
+    const name = track.name.replace(/\s*[([].*?[)\]]/g, '').replace(/\s+-\s+.*$/, ''); // drop "(feat. …)", "- Remastered"
+    const query = new URLSearchParams({ api_key: GETSONGBPM_KEY, type: 'both', lookup: `song:${name} artist:${track.firstArtist}` });
+    const p = fetch(`https://api.getsong.co/search/?${query}`)
+      .then((res) => (res.ok ? res.json() : {}))
+      .then((data) => {
+        const list = Array.isArray(data.search) ? data.search : [];
+        const artist = track.firstArtist.toLowerCase();
+        const best = list.find((x) => x.artist && String(x.artist.name).toLowerCase() === artist) || list[0];
+        return best ? parseFloat(best.tempo) || 0 : 0;
+      });
+    p.catch(() => tempoCache.delete(track.id)); // offline: try again next time
+    tempoCache.set(track.id, p);
+  }
+  try {
+    const bpm = await tempoCache.get(track.id);
+    if (view.track && view.track.id === track.id) glow.bpm = bpm;
+  } catch { /* keep the default rhythm */ }
 }
 
 let lastElapsed = '';
@@ -658,9 +683,11 @@ const CONTROL = {
 
 async function control(action, positionMs) {
   const [method, path] = CONTROL[action];
+  let ok = false;
   const query = action === 'seek' ? `?position_ms=${Math.round(positionMs)}` : '';
   try {
     const res = await api(path + query, { method });
+    ok = res.ok;
     if (res.status === 404) flash('No active Spotify device — start playing in Spotify first');
     else if (res.status === 403) flash('Spotify said no (Premium is needed for controls)');
     else if (res.status === 429) flash('Too many clicks — wait a moment');
@@ -677,16 +704,35 @@ async function control(action, positionMs) {
       lyr.idx = -2; // re-centre the lyrics at the new spot
     }
   } catch (e) {
-    if (e instanceof AuthError) { logout('Your Spotify login expired. Please log in again.'); return; }
+    if (e instanceof AuthError) { logout('Your Spotify login expired. Please log in again.'); return false; }
     flash('Offline — could not reach Spotify');
   }
   setTimeout(poll, 600);
+  return ok;
 }
 
 // ---------------------------------------------------------------- up next (M4)
-function trackRow(item, current) {
+// shortcut: Spotify has no "play queue item N", so we press Next N times (those songs count as skipped).
+let skipping = false;
+async function skipAhead(steps) {
+  if (skipping) return;
+  skipping = true;
+  for (let i = 0; i < steps; i++) {
+    if (!(await control('next'))) break;
+  }
+  skipping = false;
+}
+
+function trackRow(item, current, steps) {
   const row = document.createElement('div');
   row.className = current ? 'row current' : 'row';
+  if (!current) {
+    row.setAttribute('role', 'button');
+    row.tabIndex = 0;
+    row.title = 'Play this';
+    row.addEventListener('click', () => skipAhead(steps));
+    row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); skipAhead(steps); } });
+  }
   const images = item.album ? item.album.images : item.images || (item.show && item.show.images) || [];
   const thumb = document.createElement('img');
   thumb.className = 'thumb';
@@ -711,7 +757,7 @@ async function loadQueue() {
     const data = await res.json();
     const rows = [];
     if (data.currently_playing) rows.push(trackRow(data.currently_playing, true));
-    (data.queue || []).slice(0, 5).forEach((item) => rows.push(trackRow(item, false)));
+    (data.queue || []).slice(0, 5).forEach((item, i) => rows.push(trackRow(item, false, i + 1)));
     els.queue.replaceChildren(...rows);
   } catch (e) {
     if (e instanceof AuthError) logout('Your Spotify login expired. Please log in again.');
