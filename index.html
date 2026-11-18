@@ -32,6 +32,46 @@
       <img class="cover" id="cover1" alt="" crossorigin="anonymous">
     </div>
 
+    <aside class="panel upnext" aria-label="Up next">
+      <div class="cap">UP NEXT</div>
+      <div id="queue"></div>
+    </aside>
+
+    <section class="panel lyrics" aria-label="Lyrics">
+      <div class="cap">LYRICS</div>
+      <div class="lyrwin" id="lyrwin"><div class="lyrlist" id="lyrlist"></div></div>
+    </section>
+
+    <section class="glassplayer">
+      <div class="now">
+        <div class="nowtext">
+          <div class="nowtitle" id="ptitle"></div>
+          <div class="small" id="partist"></div>
+        </div>
+        <div class="label">Playing on Spotify</div>
+      </div>
+      <div class="progress"><div class="fill" id="fill"></div><div class="knob" id="knob"></div></div>
+      <div class="times"><span id="elapsed">0:00</span><span id="total">0:00</span></div>
+      <div class="controls chrome">
+        <button class="icon" id="prevBtn" type="button" aria-label="Previous track">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>
+        </button>
+        <button class="play" id="playBtn" type="button" aria-label="Play or pause">
+          <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+          <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+        </button>
+        <button class="icon" id="nextBtn" type="button" aria-label="Next track">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>
+        </button>
+      </div>
+    </section>
+
+    <div class="toggles chrome">
+      <button class="toggle" id="upnextToggle" type="button" aria-pressed="false"><span>Up next</span><span class="switch"></span></button>
+      <button class="toggle" id="lyricsToggle" type="button" aria-pressed="false"><span>Lyrics</span><span class="switch"></span></button>
+      <button class="toggle linkbtn" id="copyLink" type="button">Screen saver link</button>
+    </div>
+
     <section class="login" id="login" hidden>
       <h1>Glowstick</h1>
       <p>Shows what you're playing, right on your desktop.</p>

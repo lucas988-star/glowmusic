@@ -14,10 +14,12 @@ const POLL_PLAYING_MS = 3000;
 const POLL_IDLE_MS = 10000;
 const PAUSED_TO_IDLE_MS = 5 * 60 * 1000; // paused this long → show the idle clock
 const REFRESH_EARLY_MS = 2 * 60 * 1000;  // refresh the token 2 min before it expires
+const DEFAULT_ACCENT = '#aaff59';
 
 const AUTH_URL = 'https://accounts.spotify.com/authorize';
 const TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const API_URL = 'https://api.spotify.com/v1';
+const LRCLIB_URL = 'https://lrclib.net/api';
 
 // The page's own address (without file name / query) is the redirect URI:
 // http://127.0.0.1:8000/  or  https://lucas988-star.github.io/glowmusic/
@@ -28,6 +30,8 @@ const KEY = {
   verifier: 'glowstick.pkce_verifier',
   state: 'glowstick.pkce_state',
   returnQuery: 'glowstick.return_query',
+  upnext: 'glowstick.show_upnext',
+  lyrics: 'glowstick.show_lyrics',
 };
 
 // ---------------------------------------------------------------- helpers
@@ -41,6 +45,21 @@ const els = {
   artist: $('artist'),
   covers: [$('cover0'), $('cover1')],
   bgs: [$('bg0'), $('bg1')],
+  ptitle: $('ptitle'),
+  partist: $('partist'),
+  fill: $('fill'),
+  knob: $('knob'),
+  elapsed: $('elapsed'),
+  total: $('total'),
+  prevBtn: $('prevBtn'),
+  playBtn: $('playBtn'),
+  nextBtn: $('nextBtn'),
+  queue: $('queue'),
+  lyrwin: $('lyrwin'),
+  lyrlist: $('lyrlist'),
+  upnextToggle: $('upnextToggle'),
+  lyricsToggle: $('lyricsToggle'),
+  copyLink: $('copyLink'),
   login: $('login'),
   loginBtn: $('loginBtn'),
   loginMsg: $('loginMsg'),
@@ -55,6 +74,8 @@ const store = {
 
 class AuthError extends Error {}   // login is invalid → show login screen
 class NetError extends Error {}    // offline / Spotify unreachable → keep last track
+
+let MODE = 'normal'; // 'normal' | 'wallpaper' | 'screensaver' (set in boot)
 
 // ---------------------------------------------------------------- PKCE login
 function randomString(length) {
@@ -114,6 +135,14 @@ async function handleLoginRedirect() {
     code_verifier: verifier,
   });
   saveTokens(data);
+}
+
+// Screen saver link: …#rt=<refresh token>. Store it, then wipe it from the address bar.
+function takeTokenFromHash() {
+  const rt = new URLSearchParams(location.hash.slice(1)).get('rt');
+  if (!rt) return;
+  store.set(KEY.tokens, { refresh_token: rt, access_token: '', expires_at: 0 });
+  history.replaceState(null, '', location.pathname + location.search);
 }
 
 async function tokenRequest(body) {
@@ -237,6 +266,10 @@ async function poll() {
         if (!data.is_playing && Date.now() - lastPlayingAt > PAUSED_TO_IDLE_MS) showIdle();
         else showTrack(data);
         delay = data.is_playing ? POLL_PLAYING_MS : POLL_IDLE_MS;
+        // Check again right when the song should end, so the next one appears quickly.
+        if (data.is_playing && data.item.duration_ms) {
+          delay = Math.min(delay, Math.max(500, data.item.duration_ms - data.progress_ms + 400));
+        }
       } else {
         showIdle(); // e.g. an ad or a private session
         delay = POLL_IDLE_MS;
@@ -251,7 +284,8 @@ async function poll() {
     delay = POLL_IDLE_MS;
   }
   polling = false;
-  pollTimer = setTimeout(poll, delay);
+  // Hidden page: check rarely (some wallpaper apps report "hidden" even when you can see it).
+  pollTimer = setTimeout(poll, document.hidden ? Math.max(delay, 30000) : delay);
 }
 
 function stopPolling() {
@@ -260,8 +294,8 @@ function stopPolling() {
 }
 
 // ---------------------------------------------------------------- view
-const view = { trackId: null, artUrl: null, front: 0, hasText: false };
-// Shared playback info (used by the progress bar in Milestone 3).
+const view = { track: null, artUrl: null, front: 0, hasText: false };
+// Where playback was at the last poll; the progress bar extrapolates from it.
 const playback = { id: null, progressMs: 0, durationMs: 0, isPlaying: false, at: 0 };
 
 function setScreenState(state) {
@@ -269,9 +303,16 @@ function setScreenState(state) {
   ['boot', 'login', 'idle', 'playing', 'paused'].forEach((c) => s.toggle(`is-${c}`, c === state));
 }
 
+let flashUntil = 0;
 function setStatus(text) {
+  if (!text && Date.now() < flashUntil) return; // let a short message finish
   if (text) els.status.textContent = text;
   els.status.classList.toggle('on', Boolean(text));
+}
+function flash(text) {
+  flashUntil = Date.now() + 4000;
+  setStatus(text);
+  setTimeout(() => setStatus(''), 4100);
 }
 
 function showLogin(message = '') {
@@ -279,7 +320,9 @@ function showLogin(message = '') {
   setScreenState('login');
   els.login.hidden = false;
   els.loginBtn.disabled = false;
-  els.loginMsg.textContent = message;
+  els.loginMsg.textContent = MODE === 'screensaver'
+    ? 'Not logged in. In your browser, open Glowstick and click "Screen saver link" (see README).'
+    : message;
   setStatus('');
 }
 
@@ -290,44 +333,53 @@ function logout(message) {
 
 function showIdle() {
   setScreenState('idle');
-  view.trackId = null;
+  view.track = null;
+  playback.id = null;
   playback.isPlaying = false;
 }
 
 function showTrack(data) {
   const item = data.item;
   const isEpisode = item.type === 'episode';
-  const id = item.id || item.uri;
-  const title = item.name || '';
-  const artist = isEpisode
-    ? (item.show && item.show.name) || ''
-    : (item.artists || []).map((a) => a.name).join(', ');
-  const album = isEpisode ? '' : (item.album && item.album.name) || '';
+  const artists = isEpisode ? [(item.show && item.show.name) || ''] : (item.artists || []).map((a) => a.name);
   const images = isEpisode ? (item.images && item.images.length ? item.images : item.show && item.show.images) : item.album && item.album.images;
-  const art = images && images[0] ? images[0].url : null;
+  const track = {
+    id: item.id || item.uri,
+    name: item.name || '',
+    artist: artists.join(', '),
+    firstArtist: artists[0] || '',
+    album: isEpisode ? '' : (item.album && item.album.name) || '',
+    durationMs: item.duration_ms || 0,
+    isEpisode,
+  };
 
   Object.assign(playback, {
-    id,
+    id: track.id,
     progressMs: data.progress_ms || 0,
-    durationMs: item.duration_ms || 0,
+    durationMs: track.durationMs,
     isPlaying: Boolean(data.is_playing),
     at: performance.now(),
   });
-
+  els.playBtn.classList.toggle('playing', playback.isPlaying);
   setScreenState(data.is_playing ? 'playing' : 'paused');
-  if (id !== view.trackId) {
-    view.trackId = id;
-    setTrackText(title, album ? `${artist}  ·  ${album}` : artist);
+
+  if (!view.track || track.id !== view.track.id) {
+    view.track = track;
+    const sub = track.album ? `${track.artist}  ·  ${track.album}` : track.artist;
+    setTrackText(track.name, sub);
+    els.total.textContent = formatTime(track.durationMs);
+    if (prefs.upnext) loadQueue();
+    if (prefs.lyrics) loadLyrics(track);
   }
-  setArt(art);
+  setArt(images && images[0] ? images[0].url : null);
 }
 
 let textTimer = null;
 function setTrackText(title, subtitle) {
   clearTimeout(textTimer);
   const apply = () => {
-    els.title.textContent = title;
-    els.artist.textContent = subtitle;
+    els.title.textContent = els.ptitle.textContent = title;
+    els.artist.textContent = els.partist.textContent = subtitle;
     els.info.classList.remove('fade');
   };
   if (!view.hasText) { view.hasText = true; apply(); return; }
@@ -346,12 +398,14 @@ async function setArt(url) {
   const layers = [els.covers[back], els.bgs[back]];
   if (!url) {
     [...els.covers, ...els.bgs].forEach((el) => el.classList.remove('show'));
+    setAccent(null);
     return;
   }
   layers.forEach((el) => { el.src = url; });
   await Promise.all(layers.map((el) => el.decode().catch(() => {})));
   if (token !== artToken) return; // a newer track arrived meanwhile
 
+  setAccent(pickAccent(els.covers[back]));
   [els.covers, els.bgs].forEach((pair) => {
     pair[back].classList.add('top', 'show');
     pair[view.front].classList.remove('top');
@@ -361,6 +415,266 @@ async function setArt(url) {
   artCleanup = setTimeout(() => {
     [els.covers, els.bgs].forEach((pair) => pair[1 - view.front].classList.remove('show'));
   }, 1500);
+}
+
+// ---------------------------------------------------------------- colour (M2)
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  const l = (max + min) / 2;
+  if (!d) return [0, 0, l];
+  const s = d / (1 - Math.abs(2 * l - 1));
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [(h * 60 + 360) % 360, s, l];
+}
+
+// Most common vivid hue on the cover, pushed to a bright glow-friendly colour.
+function pickAccent(img) {
+  try {
+    const size = 32;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, size, size);
+    const px = ctx.getImageData(0, 0, size, size).data;
+    const buckets = Array.from({ length: 12 }, () => ({ w: 0, h: 0, s: 0, l: 0 }));
+    for (let i = 0; i < px.length; i += 4) {
+      const [h, s, l] = rgbToHsl(px[i], px[i + 1], px[i + 2]);
+      const w = s * s * (1 - Math.abs(l - 0.5) * 2); // vivid + mid-bright pixels count most
+      if (w < 0.05) continue;
+      const b = buckets[Math.floor(h / 30) % 12];
+      b.w += w; b.h += h * w; b.s += s * w; b.l += l * w;
+    }
+    const best = buckets.reduce((a, b) => (b.w > a.w ? b : a));
+    if (best.w < size * size * 0.02) return null; // black-and-white cover
+    const h = best.h / best.w;
+    const s = Math.max(best.s / best.w, 0.65) * 100;
+    const l = Math.min(Math.max(best.l / best.w, 0.55), 0.68) * 100;
+    return `hsl(${h.toFixed(0)} ${s.toFixed(0)}% ${l.toFixed(0)}%)`;
+  } catch {
+    return null; // canvas blocked (no CORS) → keep default colour
+  }
+}
+
+function setAccent(color) {
+  els.screen.style.setProperty('--accent', color || DEFAULT_ACCENT);
+}
+
+// ---------------------------------------------------------------- progress (M3)
+function formatTime(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function currentPosition() {
+  const pos = playback.progressMs + (playback.isPlaying ? performance.now() - playback.at : 0);
+  return Math.min(pos, playback.durationMs || pos);
+}
+
+let lastElapsed = '';
+function frame() {
+  requestAnimationFrame(frame); // the browser pauses this by itself when the page is hidden
+  if (!playback.id) return;
+  const pos = currentPosition();
+  const pct = playback.durationMs ? (pos / playback.durationMs) * 100 : 0;
+  els.fill.style.width = `${pct}%`;
+  els.knob.style.left = `${pct}%`;
+  const elapsed = formatTime(pos);
+  if (elapsed !== lastElapsed) els.elapsed.textContent = lastElapsed = elapsed;
+  if (prefs.lyrics) updateLyrics(pos);
+}
+
+// ---------------------------------------------------------------- controls (M3)
+const CONTROL = {
+  play: ['PUT', '/me/player/play'],
+  pause: ['PUT', '/me/player/pause'],
+  next: ['POST', '/me/player/next'],
+  previous: ['POST', '/me/player/previous'],
+};
+
+async function control(action) {
+  const [method, path] = CONTROL[action];
+  try {
+    const res = await api(path, { method });
+    if (res.status === 404) flash('No active Spotify device — start playing in Spotify first');
+    else if (res.status === 403) flash('Spotify said no (Premium is needed for controls)');
+    else if (res.status === 429) flash('Too many clicks — wait a moment');
+    else if (res.ok && (action === 'play' || action === 'pause')) {
+      // Update right away instead of waiting for the next poll.
+      Object.assign(playback, { progressMs: currentPosition(), at: performance.now(), isPlaying: action === 'play' });
+      els.playBtn.classList.toggle('playing', playback.isPlaying);
+      setScreenState(playback.isPlaying ? 'playing' : 'paused');
+      if (playback.isPlaying) lastPlayingAt = Date.now();
+    }
+  } catch (e) {
+    if (e instanceof AuthError) { logout('Your Spotify login expired. Please log in again.'); return; }
+    flash('Offline — could not reach Spotify');
+  }
+  setTimeout(poll, 600);
+}
+
+// ---------------------------------------------------------------- up next (M4)
+function trackRow(item, current) {
+  const row = document.createElement('div');
+  row.className = current ? 'row current' : 'row';
+  const images = item.album ? item.album.images : item.images || (item.show && item.show.images) || [];
+  const thumb = document.createElement('img');
+  thumb.className = 'thumb';
+  thumb.alt = '';
+  if (images.length) thumb.src = images[images.length - 1].url; // smallest size
+  const text = document.createElement('div');
+  const song = document.createElement('div');
+  song.className = 'song';
+  song.textContent = item.name;
+  const by = document.createElement('div');
+  by.className = 'small';
+  by.textContent = item.artists ? item.artists.map((a) => a.name).join(', ') : (item.show && item.show.name) || '';
+  text.append(song, by);
+  row.append(thumb, text);
+  return row;
+}
+
+async function loadQueue() {
+  try {
+    const res = await api('/me/player/queue');
+    if (!res.ok) return;
+    const data = await res.json();
+    const rows = [];
+    if (data.currently_playing) rows.push(trackRow(data.currently_playing, true));
+    (data.queue || []).slice(0, 5).forEach((item) => rows.push(trackRow(item, false)));
+    els.queue.replaceChildren(...rows);
+  } catch (e) {
+    if (e instanceof AuthError) logout('Your Spotify login expired. Please log in again.');
+    // offline: keep the old list
+  }
+}
+
+// ---------------------------------------------------------------- lyrics (M5)
+const lyricsCache = new Map(); // track id → Promise<{synced, lines, note?} | null>
+const lyr = { id: null, lines: [], synced: false, idx: -1, maxScroll: 0 };
+
+// "[01:02.50] words" → [{ t: 62500, text: 'words' }]
+function parseLrc(text) {
+  const out = [];
+  for (const raw of text.split('\n')) {
+    const stamps = [...raw.matchAll(/\[(\d+):(\d+(?:\.\d+)?)\]/g)];
+    const words = raw.replace(/\[[^\]]*\]/g, '').trim();
+    for (const m of stamps) out.push({ t: Math.round((Number(m[1]) * 60 + Number(m[2])) * 1000), text: words });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+console.assert(parseLrc('[00:01.50]a\n[01:02][01:03]b').map((l) => l.t).join() === '1500,62000,63000', 'parseLrc');
+
+async function fetchLrclib(path, params) {
+  const res = await fetch(`${LRCLIB_URL}/${path}?${new URLSearchParams(params)}`); // throws when offline
+  return res.ok ? res.json() : null;
+}
+
+async function findLyrics(track) {
+  const seconds = Math.round(track.durationMs / 1000);
+  const exact = await fetchLrclib('get', {
+    track_name: track.name, artist_name: track.firstArtist, album_name: track.album, duration: seconds,
+  });
+  if (exact && (exact.syncedLyrics || exact.plainLyrics || exact.instrumental)) return exact;
+  const list = (await fetchLrclib('search', { track_name: track.name, artist_name: track.firstArtist })) || [];
+  const close = list.filter((x) => Math.abs((x.duration || 0) - seconds) <= 4);
+  const pool = close.length ? close : list;
+  return pool.find((x) => x.syncedLyrics) || pool.find((x) => x.plainLyrics) || null;
+}
+
+function getLyrics(track) {
+  if (!lyricsCache.has(track.id)) {
+    const p = findLyrics(track).then((d) => {
+      if (!d) return null;
+      if (d.syncedLyrics) return { synced: true, lines: parseLrc(d.syncedLyrics) };
+      if (d.plainLyrics) return { synced: false, lines: d.plainLyrics.split('\n').map((text) => ({ t: 0, text: text.trim() })) };
+      if (d.instrumental) return { synced: false, lines: [], note: 'Instrumental' };
+      return null;
+    });
+    p.catch(() => lyricsCache.delete(track.id)); // offline: try again next time
+    lyricsCache.set(track.id, p);
+  }
+  return lyricsCache.get(track.id);
+}
+
+function lyricsNote(text) {
+  const note = document.createElement('div');
+  note.className = 'lyrnote';
+  note.textContent = text;
+  els.lyrlist.replaceChildren(note);
+  els.lyrlist.style.transform = '';
+  lyr.lines = [];
+}
+
+async function loadLyrics(track) {
+  lyr.id = track.id;
+  if (track.isEpisode) { lyricsNote('No lyrics for podcasts'); return; }
+  lyricsNote('Loading lyrics…');
+  let result;
+  try { result = await getLyrics(track); } catch { result = undefined; }
+  if (!view.track || view.track.id !== track.id) return; // song changed meanwhile
+  if (result === undefined) { lyricsNote('Lyrics unavailable offline'); return; }
+  if (!result) { lyricsNote('No lyrics found'); return; }
+  if (result.note) { lyricsNote(result.note); return; }
+
+  els.lyrlist.replaceChildren(...result.lines.map((l) => {
+    const div = document.createElement('div');
+    div.className = 'line';
+    div.textContent = l.text || '♪';
+    return div;
+  }));
+  els.lyrlist.classList.toggle('plain', !result.synced);
+  Object.assign(lyr, { lines: result.lines, synced: result.synced, idx: -1, maxScroll: 0 });
+  els.lyrlist.style.transform = '';
+  requestAnimationFrame(() => { lyr.maxScroll = Math.max(0, els.lyrlist.scrollHeight - els.lyrwin.clientHeight); });
+}
+
+function updateLyrics(pos) {
+  if (!lyr.lines.length || lyr.id !== playback.id) return;
+  if (!lyr.synced) { // unsynced: scroll slowly along with the song
+    const y = Math.round(lyr.maxScroll * (pos / (playback.durationMs || 1)));
+    els.lyrlist.style.transform = `translateY(${-y}px)`;
+    return;
+  }
+  let idx = -1;
+  while (idx + 1 < lyr.lines.length && lyr.lines[idx + 1].t <= pos + 250) idx++;
+  if (idx === lyr.idx) return;
+  const nodes = els.lyrlist.children;
+  if (nodes[lyr.idx]) nodes[lyr.idx].classList.remove('active');
+  lyr.idx = idx;
+  const active = nodes[Math.max(idx, 0)];
+  if (idx >= 0) active.classList.add('active');
+  // Centre the current line in the window.
+  const y = active.offsetTop + active.offsetHeight / 2 - els.lyrwin.clientHeight / 2;
+  els.lyrlist.style.transform = `translateY(${-Math.max(0, y)}px)`;
+}
+
+// ---------------------------------------------------------------- toggles
+const prefs = { upnext: false, lyrics: false };
+
+function setPref(name, on) {
+  prefs[name] = on;
+  store.set(KEY[name], on);
+  els[`${name}Toggle`].setAttribute('aria-pressed', String(on));
+  els.screen.classList.toggle(`show-${name}`, on);
+  if (on && view.track) {
+    if (name === 'upnext') loadQueue();
+    else loadLyrics(view.track);
+  }
+}
+
+// Screen saver link = this page in screen saver mode + your login + current toggles.
+async function copyScreenSaverLink() {
+  const t = getTokens();
+  if (!t || !t.refresh_token) return;
+  const query = new URLSearchParams({ mode: 'screensaver', upnext: prefs.upnext ? 1 : 0, lyrics: prefs.lyrics ? 1 : 0 });
+  const url = `${REDIRECT_URI}?${query}#rt=${encodeURIComponent(t.refresh_token)}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    flash('Screen saver link copied — keep it private, it works like a password');
+  } catch {
+    window.prompt('Copy this screen saver link (keep it private):', url);
+  }
 }
 
 // ---------------------------------------------------------------- clock
@@ -384,6 +698,31 @@ function tick() {
   setTimeout(tick, 1000 - now.getMilliseconds() + 10);
 }
 
+// ---------------------------------------------------------------- modes (M6)
+function setupMode() {
+  const query = new URLSearchParams(location.search);
+  MODE = ['wallpaper', 'screensaver'].includes(query.get('mode')) ? query.get('mode') : 'normal';
+  els.screen.classList.add(`mode-${MODE}`);
+
+  // Toggles: ?upnext=1&lyrics=0 in the address wins over what was saved.
+  for (const name of ['upnext', 'lyrics']) {
+    const fromUrl = query.get(name);
+    setPref(name, fromUrl !== null ? fromUrl === '1' : store.get(KEY[name]) === true);
+  }
+
+  if (MODE === 'wallpaper') {
+    // Hide buttons + cursor after 3 s without mouse movement.
+    let timer = null;
+    const wake = () => {
+      els.screen.classList.remove('chrome-hidden');
+      clearTimeout(timer);
+      timer = setTimeout(() => els.screen.classList.add('chrome-hidden'), 3000);
+    };
+    ['mousemove', 'mousedown', 'keydown', 'touchstart'].forEach((e) => addEventListener(e, wake, { passive: true }));
+    wake();
+  }
+}
+
 // ---------------------------------------------------------------- start
 async function boot() {
   // Spotify only accepts 127.0.0.1 (not "localhost") as a local redirect.
@@ -393,19 +732,30 @@ async function boot() {
   }
   tick();
   els.loginBtn.addEventListener('click', () => startLogin().catch(() => showLogin('Could not start login.')));
+  els.playBtn.addEventListener('click', () => control(playback.isPlaying ? 'pause' : 'play'));
+  els.prevBtn.addEventListener('click', () => control('previous'));
+  els.nextBtn.addEventListener('click', () => control('next'));
+  els.upnextToggle.addEventListener('click', () => setPref('upnext', !prefs.upnext));
+  els.lyricsToggle.addEventListener('click', () => setPref('lyrics', !prefs.lyrics));
+  els.copyLink.addEventListener('click', copyScreenSaverLink);
+  requestAnimationFrame(frame);
 
   if (location.protocol === 'file:' || !window.crypto || !crypto.subtle) {
+    setupMode();
     showLogin('Open this page through the local server (see README), not as a file.');
     els.loginBtn.disabled = true;
     return;
   }
 
+  takeTokenFromHash();
   try {
     await handleLoginRedirect();
   } catch (e) {
+    setupMode();
     showLogin(e instanceof AuthError ? e.message : 'Could not reach Spotify. Check your connection.');
     return;
   }
+  setupMode(); // after the redirect, so ?mode=… is back in the address
 
   if (!getTokens()) { showLogin(); return; }
 
@@ -415,9 +765,10 @@ async function boot() {
   poll();
 }
 
-window.addEventListener('online', () => poll());
+window.addEventListener('online', () => { if (getTokens() && els.login.hidden) poll(); });
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && getTokens()) poll();
+  els.screen.classList.toggle('is-hidden', document.hidden);
+  if (!document.hidden && getTokens() && els.login.hidden) poll();
 });
 
 boot();

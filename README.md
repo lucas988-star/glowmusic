@@ -13,8 +13,12 @@ login uses Spotify's *Authorization Code with PKCE* flow in the browser.
 | `style.css` | The look (glass, glow, animations) |
 | `app.js` | Spotify login, polling and everything that moves |
 
-**Status:** Milestone 1 (login + now playing) is done. Colours, progress bar,
-controls, up next, lyrics and the wallpaper/screen saver modes are coming next.
+**Features:** clock, current song with big cover, glow in the cover's colour,
+live progress bar, play/pause/previous/next (Spotify Premium), "Up next" panel,
+synced lyrics (from [LRCLIB](https://lrclib.net)), wallpaper and screen saver modes.
+
+Buttons at the top right: **Up next** and **Lyrics** turn the panels on/off
+(remembered), **Screen saver link** is explained in section 4.
 
 ---
 
@@ -53,16 +57,35 @@ Make sure this exact address is listed as a Redirect URI in your Spotify app
 
 1. Install **Plash** from the Mac App Store.
 2. Click the Plash icon in the menu bar → **Add Website**.
-3. URL: `https://lucas988-star.github.io/glowmusic/`
+3. URL: `https://lucas988-star.github.io/glowmusic/?mode=wallpaper`
 4. To log in the first time, turn on **Browsing Mode** in the Plash menu,
    click **Log in with Spotify**, then turn Browsing Mode off again.
    Plash remembers the login.
 
-*(A dedicated `?mode=wallpaper` that hides buttons and the cursor arrives in Milestone 6.)*
+In wallpaper mode the buttons and cursor fade out after 3 seconds without
+mouse movement. With Browsing Mode on, move the mouse and they come back —
+everything is clickable.
 
 ## 4. Use it as your screen saver (WebViewScreenSaver)
 
-Coming in Milestone 6 (needs a special "screen saver link").
+The screen saver has its own separate storage, so it can't reuse your Plash or
+browser login, and you can't click "Log in" in a screen saver. Instead you give
+it a link that already contains your login:
+
+1. Install **WebViewScreenSaver** (e.g. `brew install --cask webviewscreensaver`,
+   or download it from its GitHub page), then open
+   **System Settings → Screen Saver** and pick **WebViewScreenSaver**.
+2. Open Glowstick in your browser (logged in). Set **Up next** / **Lyrics** the
+   way you want them in the screen saver.
+3. Click **Screen saver link** (top right). The link is copied.
+4. In the screen saver's **Options…**, add/replace the address with that link.
+
+> ⚠️ **This link is like a password.** Anyone who has it can see and control
+> your Spotify playback. Never share it, post it or put it in this repo.
+> If it ever leaks: spotify.com → Account → *Manage apps* → remove access, then
+> log in again and make a new link.
+
+If the screen saver later shows "Not logged in", make a new link the same way.
 
 ---
 
@@ -89,6 +112,13 @@ spotify.com → Account → *Manage apps*). Just log in again.
 **"Spotify asked us to slow down" (429)**
 Too many requests (often because the page is open in several places at once).
 Glowstick waits as long as Spotify asks, then continues by itself.
+
+**"No active Spotify device" when pressing a button**
+Spotify needs a device that is playing (or was just playing). Start a song in
+the Spotify app first. Controls need Spotify Premium.
+
+**"No lyrics found"**
+Lyrics come from LRCLIB, a free community database. Some songs aren't there.
 
 **Nothing shows up**
 Glowstick shows only the clock when nothing is playing. Start playback in any
