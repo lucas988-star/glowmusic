@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@200;300;400;500;600&display=swap">
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
   <main class="screen is-boot" id="screen">
@@ -17,6 +17,8 @@
     <img class="bg" id="bg1" alt="" crossorigin="anonymous">
     <div class="veil"></div>
     <div class="edge" aria-hidden="true"></div>
+    <canvas class="glowband" id="glowband" aria-hidden="true"></canvas>
+    <canvas class="sparks" id="sparks" aria-hidden="true"></canvas>
 
     <header class="clock">
       <div class="date" id="date"></div>
@@ -53,7 +55,7 @@
         </div>
         <div class="label">Playing on Spotify</div>
       </div>
-      <div class="progress"><div class="fill" id="fill"></div><div class="knob" id="knob"></div></div>
+      <div class="progress" id="progress" title="Click to jump"><div class="fill" id="fill"></div><div class="knob" id="knob"></div></div>
       <div class="times"><span id="elapsed">0:00</span><span id="total">0:00</span></div>
       <div class="controls chrome">
         <button class="icon" id="prevBtn" type="button" aria-label="Previous track">
@@ -87,6 +89,6 @@
     <div class="status" id="status" role="status" aria-live="polite"></div>
   </main>
 
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

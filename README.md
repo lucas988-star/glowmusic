@@ -117,7 +117,7 @@ Glowstick waits as long as Spotify asks, then continues by itself.
 Spotify needs a device that is playing (or was just playing). Start a song in
 the Spotify app first. Controls need Spotify Premium.
 
-**"No lyrics found"**
+**"You'll have to sing on this one"**
 Lyrics come from LRCLIB, a free community database. Some songs aren't there.
 
 **Nothing shows up**

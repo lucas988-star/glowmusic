@@ -367,7 +367,7 @@ function showTrack(data) {
     view.track = track;
     const sub = track.album ? `${track.artist}  ·  ${track.album}` : track.artist;
     setTrackText(track.name, sub);
-    kick = 1.4;
+    songChanged();
     els.total.textContent = formatTime(track.durationMs);
     if (prefs.upnext) loadQueue();
     if (prefs.lyrics) loadLyrics(track);
@@ -479,28 +479,165 @@ function currentPosition() {
   return Math.min(pos, playback.durationMs || pos);
 }
 
-// Fake "reactive" glow: no audio access on the web, so the glow follows what we do know —
-// a slow organic drift, plus a flash on every new lyric line and every new song.
-const glowEls = [document.querySelector('.edge'), document.querySelector('.artglow')];
+// ---------------------------------------------------------------- glow
+// No audio access on the web, so the glow "reacts" to what we do know about the song:
+// every new lyric line gives a flash, a new song sends a wave of light around the screen,
+// and in between the band wobbles with random bumps.
+const glowEls = [document.querySelector('.artglow')];
 const calm = matchMedia('(prefers-reduced-motion: reduce)');
-let kick = 0;
-let lastFrame = 0;
-function updateGlow(now) {
-  const dt = Math.min(0.1, (now - lastFrame) / 1000);
-  lastFrame = now;
-  if (!playback.isPlaying || calm.matches) return;
-  kick *= Math.exp(-dt * 3); // a flash fades in ~1 s
-  const t = now / 1000;
-  const drift = 0.42 + 0.18 * Math.sin(t * 1.3) * Math.sin(t * 0.41 + 1) + 0.08 * Math.sin(t * 3.1);
-  const pulse = Math.min(1, drift + kick * 0.45).toFixed(3);
-  glowEls.forEach((el) => el.style.setProperty('--pulse', pulse));
+const band = $('glowband');
+const sparkCanvas = $('sparks');
+const bandCtx = band.getContext('2d');
+const sparkCtx = sparkCanvas.getContext('2d');
+const SCALE = 0.5;          // draw at half resolution; the CSS blur hides it
+const SAMPLES = 180;        // points around the edge
+const glow = {
+  kick: 0,                  // flash strength, fades out
+  pulse: 0.4,
+  switchAt: -1e9,           // when the last song change happened (ms)
+  phases: [0, 0, 0, 0].map(() => Math.random() * Math.PI * 2),
+  color: '#aaff59',
+  colorAt: 0,
+  last: 0,
+  time: 0,
+  sparks: [],
+};
+
+function resizeGlow() {
+  for (const c of [band, sparkCanvas]) {
+    c.width = Math.round(innerWidth * SCALE);
+    c.height = Math.round(innerHeight * SCALE);
+  }
+}
+addEventListener('resize', resizeGlow);
+resizeGlow();
+
+// New song: a wave of light, a flash, new random bumps and a burst of sparks.
+function songChanged() {
+  glow.switchAt = performance.now();
+  glow.kick = 1.6;
+  glow.phases = glow.phases.map(() => Math.random() * Math.PI * 2);
+  glow.sparks.forEach((p) => { p.life = Math.random() * 0.3; p.speed *= 3; });
+}
+
+// Point on the edge rectangle at fraction u (0–1, clockwise from top-left) + inward direction.
+function edgePoint(u, w, h, m) {
+  const W = w - 2 * m, H = h - 2 * m, P = 2 * (W + H);
+  let d = (((u % 1) + 1) % 1) * P;
+  if (d < W) return [m + d, m, 0, 1];
+  d -= W;
+  if (d < H) return [w - m, m + d, -1, 0];
+  d -= H;
+  if (d < W) return [w - m - d, h - m, 0, -1];
+  d -= W;
+  return [m, h - m - d, 1, 0];
+}
+
+function bandDepth(u, t, base, now) {
+  const [a, b, c, e] = glow.phases;
+  const TAU = Math.PI * 2;
+  // Bumps: a few overlapping waves that drift at different speeds (wraps seamlessly).
+  let wobble = 1
+    + 0.42 * Math.sin(TAU * 3 * u + a + t * 0.55)
+    + 0.30 * Math.sin(TAU * 7 * u + b - t * 0.9)
+    + 0.20 * Math.sin(TAU * 13 * u + c + t * 1.7)
+    + 0.12 * Math.sin(TAU * 23 * u + e - t * 2.6);
+  wobble = Math.max(0.15, wobble);
+  let depth = base * wobble * (0.45 + 1.1 * glow.pulse);
+  // Song change: two bumps race from the top centre around both sides.
+  const since = (now - glow.switchAt) / 1000;
+  if (since < 2.5) {
+    const top = 0.5 * (band.width - 2 * 6) / (2 * (band.width + band.height - 4 * 6)); // u of top centre
+    for (const dir of [1, -1]) {
+      const pos = top + dir * since * 0.42;
+      let dist = Math.abs(u - pos) % 1;
+      dist = Math.min(dist, 1 - dist);
+      depth += base * 4 * Math.exp(-since * 1.3) * Math.exp(-(dist * dist) / 0.0022);
+    }
+  }
+  return depth;
+}
+
+function drawGlow(now) {
+  const dt = Math.min(0.1, (now - glow.last) / 1000);
+  glow.last = now;
+  const w = band.width, h = band.height, m = 6; // the visible frame is inset 12px (= 6 at half size)
+  const playing = playback.isPlaying && !calm.matches;
+  if (!calm.matches) glow.time += dt * (playing ? 1 : 0.35); // slower when paused/idle, no jumps
+  const t = glow.time;
+
+  // How strong the glow is right now.
+  glow.kick *= Math.exp(-dt * 2.5);
+  const drift = 0.45 + 0.22 * Math.sin(t * 1.3) * Math.sin(t * 0.41 + 1) + 0.1 * Math.sin(t * 3.1);
+  glow.pulse = playing ? Math.min(1.3, drift + glow.kick * 0.7) : 0.25;
+  const pulseCss = Math.min(1, glow.pulse).toFixed(3);
+  glowEls.forEach((el) => el.style.setProperty('--pulse', pulseCss));
+
+  // Read the (smoothly changing) album colour a few times per second.
+  if (now - glow.colorAt > 120) {
+    glow.color = getComputedStyle(els.screen).getPropertyValue('--accent').trim() || DEFAULT_ACCENT;
+    glow.colorAt = now;
+  }
+
+  // Band: everything between the screen edge and a wobbly inner line.
+  const base = Math.min(w, h) * 0.035;
+  const pts = [];
+  for (let i = 0; i < SAMPLES; i++) {
+    const u = i / SAMPLES;
+    const [x, y, nx, ny] = edgePoint(u, w, h, m);
+    const d = bandDepth(u, t, base, now);
+    pts.push([x, y, nx, ny, d]);
+  }
+  bandCtx.clearRect(0, 0, w, h);
+  const layer = (scale, alpha) => {
+    bandCtx.beginPath();
+    bandCtx.rect(0, 0, w, h);
+    pts.forEach(([x, y, nx, ny, d], i) => {
+      const px = x + nx * d * scale, py = y + ny * d * scale;
+      if (i) bandCtx.lineTo(px, py); else bandCtx.moveTo(px, py);
+    });
+    bandCtx.closePath();
+    bandCtx.globalAlpha = alpha;
+    bandCtx.fill('evenodd');
+  };
+  const strength = els.screen.classList.contains('is-playing') ? 1 : 0.45;
+  bandCtx.fillStyle = glow.color;
+  layer(1, 0.5 * strength);                         // soft outer glow
+  bandCtx.fillStyle = '#fff';
+  layer(0.28, (0.35 + 0.35 * Math.min(1, glow.kick)) * strength); // bright core near the edge
+  bandCtx.globalAlpha = 1;
+
+  drawSparks(dt, w, h, m, t, base, now, strength);
+}
+
+// Little specks of light floating in the glow band.
+function drawSparks(dt, w, h, m, t, base, now, strength) {
+  if (!glow.sparks.length) {
+    for (let i = 0; i < 46; i++) glow.sparks.push({ life: Math.random(), u: 0, off: 0, speed: 0, size: 0 });
+  }
+  sparkCtx.clearRect(0, 0, w, h);
+  if (calm.matches) return;
+  sparkCtx.fillStyle = '#fff';
+  for (const p of glow.sparks) {
+    p.life += dt * (0.25 + 0.5 * glow.pulse);
+    if (p.life >= 1) Object.assign(p, { life: 0, u: Math.random(), off: Math.random(), speed: (Math.random() - 0.5) * 0.02, size: 0.5 + Math.random() * 1.1 });
+    p.u += p.speed * dt;
+    p.speed *= Math.exp(-dt * 0.5);
+    const [x, y, nx, ny] = edgePoint(p.u, w, h, m);
+    const d = bandDepth(p.u, t, base, now) * (0.2 + p.off * 1.1);
+    sparkCtx.globalAlpha = Math.sin(p.life * Math.PI) * (0.4 + 0.6 * Math.min(1, glow.pulse)) * strength;
+    sparkCtx.beginPath();
+    sparkCtx.arc(x + nx * d, y + ny * d, p.size, 0, Math.PI * 2);
+    sparkCtx.fill();
+  }
+  sparkCtx.globalAlpha = 1;
 }
 
 let lastElapsed = '';
 function frame(now) {
   requestAnimationFrame(frame); // the browser pauses this by itself when the page is hidden
+  if (!els.screen.classList.contains('is-login')) drawGlow(now);
   if (!playback.id) return;
-  updateGlow(now);
   const pos = currentPosition();
   const pct = playback.durationMs ? (pos / playback.durationMs) * 100 : 0;
   els.fill.style.width = `${pct}%`;
@@ -516,12 +653,14 @@ const CONTROL = {
   pause: ['PUT', '/me/player/pause'],
   next: ['POST', '/me/player/next'],
   previous: ['POST', '/me/player/previous'],
+  seek: ['PUT', '/me/player/seek'],
 };
 
-async function control(action) {
+async function control(action, positionMs) {
   const [method, path] = CONTROL[action];
+  const query = action === 'seek' ? `?position_ms=${Math.round(positionMs)}` : '';
   try {
-    const res = await api(path, { method });
+    const res = await api(path + query, { method });
     if (res.status === 404) flash('No active Spotify device — start playing in Spotify first');
     else if (res.status === 403) flash('Spotify said no (Premium is needed for controls)');
     else if (res.status === 429) flash('Too many clicks — wait a moment');
@@ -531,6 +670,11 @@ async function control(action) {
       els.playBtn.classList.toggle('playing', playback.isPlaying);
       setScreenState(playback.isPlaying ? 'playing' : 'paused');
       if (playback.isPlaying) lastPlayingAt = Date.now();
+    } else if (res.ok && action === 'seek') {
+      Object.assign(playback, { progressMs: positionMs, at: performance.now() });
+      const old = els.lyrlist.querySelector('.active');
+      if (old) old.classList.remove('active');
+      lyr.idx = -2; // re-centre the lyrics at the new spot
     }
   } catch (e) {
     if (e instanceof AuthError) { logout('Your Spotify login expired. Please log in again.'); return; }
@@ -640,7 +784,7 @@ async function loadLyrics(track) {
   try { result = await getLyrics(track); } catch { result = undefined; }
   if (!view.track || view.track.id !== track.id) return; // song changed meanwhile
   if (result === undefined) { lyricsNote('Lyrics unavailable offline'); return; }
-  if (!result) { lyricsNote('No lyrics found'); return; }
+  if (!result) { lyricsNote("You'll have to sing on this one"); return; }
   if (result.note) { lyricsNote(result.note); return; }
 
   els.lyrlist.replaceChildren(...result.lines.map((l) => {
@@ -669,7 +813,7 @@ function updateLyrics(pos) {
   if (nodes[lyr.idx]) nodes[lyr.idx].classList.remove('active');
   lyr.idx = idx;
   const active = nodes[Math.max(idx, 0)];
-  if (idx >= 0) { active.classList.add('active'); kick = 1; }
+  if (idx >= 0) { active.classList.add('active'); glow.kick = Math.max(glow.kick, 1); }
   // Centre the current line in the window.
   const y = active.offsetTop + active.offsetHeight / 2 - els.lyrwin.clientHeight / 2;
   els.lyrlist.style.transform = `translateY(${-Math.max(0, y)}px)`;
@@ -761,6 +905,12 @@ async function boot() {
   els.playBtn.addEventListener('click', () => control(playback.isPlaying ? 'pause' : 'play'));
   els.prevBtn.addEventListener('click', () => control('previous'));
   els.nextBtn.addEventListener('click', () => control('next'));
+  $('progress').addEventListener('click', (e) => {
+    if (!playback.durationMs) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    control('seek', frac * playback.durationMs);
+  });
   els.upnextToggle.addEventListener('click', () => setPref('upnext', !prefs.upnext));
   els.lyricsToggle.addEventListener('click', () => setPref('lyrics', !prefs.lyrics));
   els.copyLink.addEventListener('click', copyScreenSaverLink);

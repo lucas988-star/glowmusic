@@ -6,12 +6,6 @@
   inherits: true;
   initial-value: #aaff59;
 }
-/* Angle of the light that travels around the screen edge. */
-@property --spin {
-  syntax: '<angle>';
-  inherits: false;
-  initial-value: 0deg;
-}
 
 :root {
   --fg: #f5f7f4;
@@ -74,45 +68,17 @@ html, body {
 .edge {
   position: absolute;
   inset: 12px;
-  border: 1px solid rgb(247 255 226 / .5);
+  border: 1px solid rgb(255 255 255 / .12); /* faint frame; the real glow is the canvas */
   border-radius: 28px;
   pointer-events: none;
-  box-shadow: inset 0 0 22px color-mix(in srgb, var(--accent) 44%, transparent), 0 0 20px color-mix(in srgb, var(--accent) 40%, transparent);
   transition: opacity 1.2s var(--ease);
 }
-/* Stronger glow on a separate layer; we animate only its opacity (cheap). */
-.edge::after {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  box-shadow: inset 0 0 34px color-mix(in srgb, var(--accent) 67%, transparent), 0 0 30px color-mix(in srgb, var(--accent) 60%, transparent);
-  opacity: 0;
-  animation: edge 6s ease-in-out infinite;
-}
-/* Two soft lights travelling around the edge. */
-.edge::before {
-  content: "";
-  position: absolute;
-  inset: -4px;
-  padding: 5px;
-  border-radius: 31px;
-  background: conic-gradient(from var(--spin),
-    transparent 0 8%, color-mix(in srgb, var(--accent) 70%, white) 18%, transparent 30% 58%,
-    color-mix(in srgb, var(--accent) 85%, white) 68%, transparent 80%);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  filter: blur(5px);
-  opacity: .55;
-  animation: spin 18s linear infinite;
-}
-/* While playing, JS drives --pulse (0–1) from the song: lyric lines, track changes, slow drift. */
-.screen.is-playing .edge::before { animation-duration: 11s; opacity: calc(.45 + var(--pulse, .5) * .5); }
-.screen.is-playing .edge::after { animation: none; opacity: var(--pulse, .5); }
+/* Wavy glow band + sparkles, drawn by app.js (drawGlow). Half resolution, blurred by CSS. */
+.glowband, .sparks { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.glowband { filter: blur(12px); mix-blend-mode: screen; }
+.sparks { mix-blend-mode: screen; }
 .screen.is-idle .edge,
-.screen.is-login .edge { opacity: .35; }
-.screen.is-idle .edge::after { animation-duration: 10s; }
+.screen.is-login .edge { opacity: .5; }
 
 /* ---------- Clock + track text ---------- */
 .clock {
@@ -316,7 +282,10 @@ html, body {
 .nowtitle { font-size: 14px; font-weight: 650; }
 .small { font-size: 11px; color: #c2cac2a8; margin-top: 4px; }
 .label { flex: none; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: #dce6dcaa; }
-.progress { height: 2px; background: #ffffff42; border-radius: 5px; margin: 17px 0 7px; position: relative; }
+.progress { height: 2px; background: #ffffff42; border-radius: 5px; margin: 17px 0 7px; position: relative; cursor: pointer; transition: height .15s; }
+.progress::before { content: ""; position: absolute; inset: -9px 0; } /* bigger click area */
+.progress:hover { height: 4px; }
+.screen.mode-screensaver .progress { pointer-events: none; }
 .fill { width: 0; height: 100%; background: var(--accent); border-radius: 5px; }
 .knob {
   position: absolute; left: 0; top: 50%;
@@ -430,8 +399,6 @@ html, body {
   from { transform: translate(-51%, -49%) scale(1); }
   to   { transform: translate(-49%, -51%) scale(1.08); }
 }
-@keyframes edge { 50% { opacity: 1; } }
-@keyframes spin { to { --spin: 360deg; } }
 @keyframes breathe { 50% { transform: scale(1.1); opacity: .7; } }
 @keyframes ring {
   0%   { transform: scale(.88); opacity: .75; }
