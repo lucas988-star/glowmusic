@@ -6,6 +6,12 @@
   inherits: true;
   initial-value: #aaff59;
 }
+/* Angle of the light that travels around the screen edge. */
+@property --spin {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
 
 :root {
   --fg: #f5f7f4;
@@ -22,7 +28,7 @@ html, body {
   overflow: hidden;
   background: #08100d;
   color: var(--fg);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  font-family: "Outfit", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -84,6 +90,26 @@ html, body {
   opacity: 0;
   animation: edge 6s ease-in-out infinite;
 }
+/* Two soft lights travelling around the edge. */
+.edge::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  padding: 5px;
+  border-radius: 31px;
+  background: conic-gradient(from var(--spin),
+    transparent 0 8%, color-mix(in srgb, var(--accent) 70%, white) 18%, transparent 30% 58%,
+    color-mix(in srgb, var(--accent) 85%, white) 68%, transparent 80%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  filter: blur(5px);
+  opacity: .55;
+  animation: spin 18s linear infinite;
+}
+/* While playing, JS drives --pulse (0–1) from the song: lyric lines, track changes, slow drift. */
+.screen.is-playing .edge::before { animation-duration: 11s; opacity: calc(.45 + var(--pulse, .5) * .5); }
+.screen.is-playing .edge::after { animation: none; opacity: var(--pulse, .5); }
 .screen.is-idle .edge,
 .screen.is-login .edge { opacity: .35; }
 .screen.is-idle .edge::after { animation-duration: 10s; }
@@ -106,10 +132,15 @@ html, body {
 .time {
   font-size: clamp(78px, 9.4vw, 144px);
   font-weight: 200;
-  letter-spacing: -.06em;
-  line-height: 1.02;
-  text-shadow: 0 8px 38px #0009;
+  letter-spacing: -.03em;
+  line-height: 1.05;
   font-variant-numeric: tabular-nums;
+  /* Glassy: light-to-clear fill with a faint coloured halo */
+  color: transparent;
+  background: linear-gradient(180deg, #fff 15%, rgb(255 255 255 / .55) 85%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  filter: drop-shadow(0 6px 30px rgb(0 0 0 / .45)) drop-shadow(0 0 18px color-mix(in srgb, var(--accent) 22%, transparent));
 }
 .trackinfo {
   transition: opacity .35s var(--ease);
@@ -117,8 +148,9 @@ html, body {
 }
 .trackinfo.fade { opacity: 0; }
 .tracktop {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: .01em;
   margin-top: 8px;
   white-space: nowrap;
   overflow: hidden;
@@ -140,7 +172,6 @@ html, body {
 .screen.is-idle .trackinfo,
 .screen.is-login .trackinfo,
 .screen.is-boot .trackinfo { opacity: 0; }
-.screen.is-idle .time { animation: idleglow 8s ease-in-out infinite; }
 
 /* ---------- Album art ---------- */
 .artzone {
@@ -171,6 +202,11 @@ html, body {
   background: radial-gradient(circle, color-mix(in srgb, var(--accent) 38%, transparent), transparent 69%);
   filter: blur(15px);
   animation: breathe 4.8s ease-in-out infinite;
+}
+.screen.is-playing .artglow {
+  animation: none;
+  transform: scale(calc(1 + var(--pulse, .5) * .14));
+  opacity: calc(.5 + var(--pulse, .5) * .5);
 }
 .ring {
   position: absolute;
@@ -395,12 +431,12 @@ html, body {
   to   { transform: translate(-49%, -51%) scale(1.08); }
 }
 @keyframes edge { 50% { opacity: 1; } }
+@keyframes spin { to { --spin: 360deg; } }
 @keyframes breathe { 50% { transform: scale(1.1); opacity: .7; } }
 @keyframes ring {
   0%   { transform: scale(.88); opacity: .75; }
   100% { transform: scale(1.22); opacity: 0; }
 }
-@keyframes idleglow { 50% { text-shadow: 0 8px 38px #0009, 0 0 40px color-mix(in srgb, var(--accent) 18%, transparent); } }
 
 /* ---------- Smaller screens ---------- */
 @media (max-width: 960px) {

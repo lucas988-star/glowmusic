@@ -367,6 +367,7 @@ function showTrack(data) {
     view.track = track;
     const sub = track.album ? `${track.artist}  ·  ${track.album}` : track.artist;
     setTrackText(track.name, sub);
+    kick = 1.4;
     els.total.textContent = formatTime(track.durationMs);
     if (prefs.upnext) loadQueue();
     if (prefs.lyrics) loadLyrics(track);
@@ -478,10 +479,28 @@ function currentPosition() {
   return Math.min(pos, playback.durationMs || pos);
 }
 
+// Fake "reactive" glow: no audio access on the web, so the glow follows what we do know —
+// a slow organic drift, plus a flash on every new lyric line and every new song.
+const glowEls = [document.querySelector('.edge'), document.querySelector('.artglow')];
+const calm = matchMedia('(prefers-reduced-motion: reduce)');
+let kick = 0;
+let lastFrame = 0;
+function updateGlow(now) {
+  const dt = Math.min(0.1, (now - lastFrame) / 1000);
+  lastFrame = now;
+  if (!playback.isPlaying || calm.matches) return;
+  kick *= Math.exp(-dt * 3); // a flash fades in ~1 s
+  const t = now / 1000;
+  const drift = 0.42 + 0.18 * Math.sin(t * 1.3) * Math.sin(t * 0.41 + 1) + 0.08 * Math.sin(t * 3.1);
+  const pulse = Math.min(1, drift + kick * 0.45).toFixed(3);
+  glowEls.forEach((el) => el.style.setProperty('--pulse', pulse));
+}
+
 let lastElapsed = '';
-function frame() {
+function frame(now) {
   requestAnimationFrame(frame); // the browser pauses this by itself when the page is hidden
   if (!playback.id) return;
+  updateGlow(now);
   const pos = currentPosition();
   const pct = playback.durationMs ? (pos / playback.durationMs) * 100 : 0;
   els.fill.style.width = `${pct}%`;
@@ -650,7 +669,7 @@ function updateLyrics(pos) {
   if (nodes[lyr.idx]) nodes[lyr.idx].classList.remove('active');
   lyr.idx = idx;
   const active = nodes[Math.max(idx, 0)];
-  if (idx >= 0) active.classList.add('active');
+  if (idx >= 0) { active.classList.add('active'); kick = 1; }
   // Centre the current line in the window.
   const y = active.offsetTop + active.offsetHeight / 2 - els.lyrwin.clientHeight / 2;
   els.lyrlist.style.transform = `translateY(${-Math.max(0, y)}px)`;
