@@ -438,15 +438,22 @@ function pickAccent(img) {
     ctx.drawImage(img, 0, 0, size, size);
     const px = ctx.getImageData(0, 0, size, size).data;
     const buckets = Array.from({ length: 12 }, () => ({ w: 0, h: 0, s: 0, l: 0 }));
+    let sumL = 0, tintW = 0, tintH = 0;
     for (let i = 0; i < px.length; i += 4) {
       const [h, s, l] = rgbToHsl(px[i], px[i + 1], px[i + 2]);
+      sumL += l; tintW += s; tintH += h * s;
       const w = s * s * (1 - Math.abs(l - 0.5) * 2); // vivid + mid-bright pixels count most
       if (w < 0.05) continue;
       const b = buckets[Math.floor(h / 30) % 12];
       b.w += w; b.h += h * w; b.s += s * w; b.l += l * w;
     }
     const best = buckets.reduce((a, b) => (b.w > a.w ? b : a));
-    if (best.w < size * size * 0.02) return null; // black-and-white cover
+    if (best.w < size * size * 0.02) {
+      // Black/white/grey cover: soft silver glow, a touch warm or cool like the cover.
+      const hue = tintW ? tintH / tintW : 0;
+      const light = 78 + (sumL / (size * size)) * 14; // darker cover → dimmer silver
+      return `hsl(${hue.toFixed(0)} ${tintW ? 10 : 0}% ${light.toFixed(0)}%)`;
+    }
     const h = best.h / best.w;
     const s = Math.max(best.s / best.w, 0.65) * 100;
     const l = Math.min(Math.max(best.l / best.w, 0.55), 0.68) * 100;

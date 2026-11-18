@@ -323,17 +323,25 @@ html, body {
 }
 .cap { font-size: 10px; letter-spacing: .2em; color: #d8e3d9aa; margin-bottom: 14px; }
 
-.upnext { left: 4.5%; width: 250px; padding: 21px; background: rgba(232, 247, 240, .12); border: 1px solid rgba(255, 255, 255, .2); }
-.row { display: flex; align-items: center; gap: 12px; padding: 9px 8px; border-radius: 13px; font-size: 13px; border: 1px solid transparent; }
+/* Both panels: same glass, same size, pulled toward the cover on wide screens */
+.upnext, .lyrics {
+  width: min(340px, 29vw);
+  padding: 22px 24px;
+  background: rgba(12, 18, 15, .6);
+  border: 1px solid #ffffff40;
+}
+.upnext { left: max(4.5%, calc(50% - 560px)); }
+.lyrics { right: max(4.5%, calc(50% - 560px)); text-align: center; }
+#queue { height: min(292px, 34vh); overflow: hidden; -webkit-mask-image: linear-gradient(#000 88%, transparent); mask-image: linear-gradient(#000 88%, transparent); } /* same height as the lyrics window */
+.row { display: flex; align-items: center; gap: 12px; padding: 6px 8px; margin-bottom: 2px; border-radius: 13px; font-size: 13px; border: 1px solid transparent; }
 .row.current { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: #caffd633; }
 .row > div { min-width: 0; }
-.thumb { flex: none; width: 36px; height: 36px; object-fit: cover; border-radius: 7px; background: #ffffff18; }
+.thumb { flex: none; width: 34px; height: 34px; object-fit: cover; border-radius: 7px; background: #ffffff18; }
 .song, .row .small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .song { font-weight: 550; }
 
-.lyrics { right: 4.5%; width: min(340px, 29vw); padding: 22px 24px; background: rgba(12, 18, 15, .6); border: 1px solid #ffffff40; text-align: center; }
 .lyrwin {
-  height: min(240px, 30vh);
+  height: min(292px, 34vh);
   overflow: hidden;
   -webkit-mask-image: linear-gradient(transparent, #000 22%, #000 78%, transparent);
   mask-image: linear-gradient(transparent, #000 22%, #000 78%, transparent);
@@ -345,7 +353,7 @@ html, body {
   text-shadow: 0 0 25px color-mix(in srgb, var(--accent) 60%, transparent);
 }
 .lyrlist.plain .line { opacity: .85; font-size: 16px; }
-.lyrnote { font-size: 13px; color: #c4ccc5aa; padding-top: calc(min(240px, 30vh) / 2 - 10px); }
+.lyrnote { font-size: 13px; color: #c4ccc5aa; padding-top: calc(min(292px, 34vh) / 2 - 10px); }
 
 /* ---------- Toggle buttons (top right) ---------- */
 .toggles { position: absolute; z-index: 4; top: 24px; right: 26px; display: flex; gap: 8px; }
@@ -355,6 +363,14 @@ html, body {
   font: inherit; font-size: 12px; cursor: pointer;
   -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
 }
+/* Up next + Lyrics share one pill */
+.togglebox {
+  display: flex; align-items: center; padding: 0 4px;
+  border: 1px solid #fff4; border-radius: 99px; background: #ffffff12;
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+}
+.togglebox .toggle { border: 0; background: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.togglebox .toggle + .toggle { border-left: 1px solid #ffffff2a; border-radius: 0; }
 .toggle .switch { height: 17px; width: 29px; border-radius: 12px; background: #ffffff44; position: relative; transition: .2s; }
 .toggle .switch::after { content: ""; position: absolute; width: 13px; height: 13px; left: 2px; top: 2px; border-radius: 50%; background: #fff; transition: .2s; }
 .toggle[aria-pressed=true] .switch { background: var(--accent); }
@@ -389,6 +405,9 @@ html, body {
 /* ---------- Smaller screens ---------- */
 @media (max-width: 960px) {
   .upnext { display: none; }
+}
+/* Toggles (top right) would touch the centred date below this width */
+@media (max-width: 1120px) {
   .toggles { top: 20px; right: 20px; }
   .clock { top: 78px !important; }
   .screen.is-idle .clock, .screen.is-boot .clock { top: 50% !important; }
