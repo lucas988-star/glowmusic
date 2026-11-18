@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Glowstick</title>
+  <meta name="referrer" content="no-referrer">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="screen is-boot" id="screen">
+    <!-- Blurred full-screen copy of the cover (two layers so we can crossfade) -->
+    <img class="bg" id="bg0" alt="" crossorigin="anonymous">
+    <img class="bg" id="bg1" alt="" crossorigin="anonymous">
+    <div class="veil"></div>
+    <div class="edge" aria-hidden="true"></div>
+
+    <header class="clock">
+      <div class="date" id="date"></div>
+      <div class="time" id="time"></div>
+      <div class="trackinfo" id="trackinfo">
+        <div class="tracktop" id="title"></div>
+        <div class="artist" id="artist"></div>
+      </div>
+    </header>
+
+    <div class="artzone" id="artzone" aria-hidden="true">
+      <div class="artglow"></div>
+      <div class="ring"></div>
+      <div class="ring"></div>
+      <img class="cover" id="cover0" alt="" crossorigin="anonymous">
+      <img class="cover" id="cover1" alt="" crossorigin="anonymous">
+    </div>
+
+    <section class="login" id="login" hidden>
+      <h1>Glowstick</h1>
+      <p>Shows what you're playing, right on your desktop.</p>
+      <button class="loginbtn" id="loginBtn" type="button">Log in with Spotify</button>
+      <p class="loginmsg" id="loginMsg" role="alert"></p>
+    </section>
+
+    <div class="status" id="status" role="status" aria-live="polite"></div>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

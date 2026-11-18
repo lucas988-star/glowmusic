@@ -1,0 +1,286 @@
+/* Glowstick — visual design follows spotify-album-lyrics-demo.html */
+
+:root {
+  /* Accent colours as "R G B" so we can use rgb(var(--x) / alpha).
+     Milestone 2 will set these from the album cover. */
+  --edge: 170 255 89;
+  --glow: 216 164 99;
+  --fg: #f5f7f4;
+  --muted: #bec8c2;
+  --green: #1ed760;
+  --ease: cubic-bezier(.4, 0, .2, 1);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #08100d;
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.screen {
+  position: fixed;
+  inset: 0;
+  isolation: isolate;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% 42%, #54402f 0, #251e1c 42%, #080b0d 100%);
+}
+
+/* ---------- Background (blurred cover) ---------- */
+.bg {
+  position: absolute;
+  z-index: -4;
+  left: 50%;
+  top: 50%;
+  width: 125vmax;
+  height: 125vmax;
+  object-fit: cover;
+  transform: translate(-50%, -50%);
+  filter: blur(34px) brightness(.3) saturate(.72);
+  opacity: 0;
+  transition: opacity 1.4s var(--ease);
+  animation: drift 22s ease-in-out infinite alternate;
+}
+.bg.show { opacity: .65; }
+.bg.top { z-index: -3; }
+.screen.is-idle .bg.show,
+.screen.is-login .bg.show { opacity: .22; }
+
+.veil {
+  position: absolute;
+  z-index: -2;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(7, 12, 10, .24), rgba(8, 11, 11, .18) 35%, rgba(3, 6, 6, .72));
+}
+
+/* ---------- Screen-edge glow ---------- */
+.edge {
+  position: absolute;
+  inset: 12px;
+  border: 1px solid rgb(247 255 226 / .5);
+  border-radius: 28px;
+  pointer-events: none;
+  box-shadow: inset 0 0 22px rgb(var(--edge) / .44), 0 0 20px rgb(var(--edge) / .4);
+  transition: opacity 1.2s var(--ease);
+}
+/* Stronger glow on a separate layer; we animate only its opacity (cheap). */
+.edge::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow: inset 0 0 34px rgb(var(--edge) / .67), 0 0 30px rgb(var(--edge) / .6);
+  opacity: 0;
+  animation: edge 3s ease-in-out infinite;
+}
+.screen.is-idle .edge,
+.screen.is-login .edge { opacity: .35; }
+.screen.is-idle .edge::after { animation-duration: 7s; }
+
+/* ---------- Clock + track text ---------- */
+.clock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 70px;
+  text-align: center;
+  transition: top 1.2s var(--ease), transform 1.2s var(--ease);
+}
+.date {
+  letter-spacing: .22em;
+  font-size: 12px;
+  color: #e8f0e0c4;
+  text-transform: uppercase;
+}
+.time {
+  font-size: clamp(78px, 9.4vw, 144px);
+  font-weight: 200;
+  letter-spacing: -.06em;
+  line-height: 1.02;
+  text-shadow: 0 8px 38px #0009;
+  font-variant-numeric: tabular-nums;
+}
+.trackinfo {
+  transition: opacity .35s var(--ease);
+  padding: 0 24px;
+}
+.trackinfo.fade { opacity: 0; }
+.tracktop {
+  font-size: 18px;
+  font-weight: 600;
+  margin-top: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.artist {
+  font-size: 13px;
+  color: #e2e8dfc9;
+  margin-top: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Idle / login: clock alone, centred */
+.screen.is-idle .clock,
+.screen.is-boot .clock { top: 50%; transform: translateY(-60%); }
+.screen.is-login .clock { top: 12%; }
+.screen.is-idle .trackinfo,
+.screen.is-login .trackinfo,
+.screen.is-boot .trackinfo { opacity: 0; }
+.screen.is-idle .time { animation: idleglow 8s ease-in-out infinite; }
+
+/* ---------- Album art ---------- */
+.artzone {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 4vh);
+  width: min(30vw, 360px, 36vh);
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  transition: opacity 1s var(--ease), transform 1s var(--ease), filter 1s var(--ease);
+}
+.screen.is-idle .artzone,
+.screen.is-login .artzone,
+.screen.is-boot .artzone {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(.94);
+}
+.screen.is-paused .artzone { filter: saturate(.7) brightness(.82); }
+.screen.is-paused .ring,
+.screen.is-paused .artglow { animation-play-state: paused; }
+
+.artglow {
+  position: absolute;
+  inset: -26%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(var(--glow) / .38), transparent 69%);
+  filter: blur(15px);
+  animation: breathe 4.8s ease-in-out infinite;
+}
+.ring {
+  position: absolute;
+  inset: -12%;
+  border: 1px solid rgb(var(--edge) / .3);
+  border-radius: 50%;
+  opacity: 0;
+  animation: ring 4.8s ease-out infinite;
+}
+.ring:nth-child(3) { animation-delay: 2.4s; }
+.cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 22px;
+  box-shadow: 0 25px 70px #000a;
+  opacity: 0;
+  transition: opacity 1s var(--ease);
+}
+.cover.show { opacity: 1; }
+.cover.top { z-index: 2; }
+
+/* ---------- Login card ---------- */
+.login {
+  position: absolute;
+  left: 50%;
+  top: 56%;
+  transform: translate(-50%, -50%);
+  width: min(380px, calc(100% - 32px));
+  padding: 30px 28px 24px;
+  border-radius: 26px;
+  background: rgba(25, 31, 28, .49);
+  border: 1px solid #ffffff35;
+  -webkit-backdrop-filter: blur(32px) saturate(1.45);
+  backdrop-filter: blur(32px) saturate(1.45);
+  box-shadow: 0 20px 70px #0007;
+  text-align: center;
+}
+.login[hidden] { display: none; }
+.login h1 {
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: .02em;
+}
+.login p { margin: 0; font-size: 13px; color: var(--muted); }
+.loginbtn {
+  margin-top: 22px;
+  border: 0;
+  border-radius: 99px;
+  padding: 12px 26px;
+  background: var(--green);
+  color: #0b2111;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+  box-shadow: 0 0 20px #1ed76055;
+  transition: transform .2s var(--ease);
+}
+.loginbtn:hover { transform: scale(1.04); }
+.loginbtn:disabled { opacity: .6; cursor: default; transform: none; }
+.loginmsg { margin-top: 14px !important; min-height: 1em; color: #ffd6c9 !important; }
+
+/* ---------- Status pill (offline, errors) ---------- */
+.status {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  padding: 7px 14px;
+  border-radius: 99px;
+  background: rgba(12, 18, 15, .6);
+  border: 1px solid #ffffff30;
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  font-size: 11px;
+  letter-spacing: .04em;
+  color: #e6eee2c0;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity .4s var(--ease);
+  pointer-events: none;
+}
+.status.on { opacity: 1; }
+
+/* ---------- Animations ---------- */
+@keyframes drift {
+  from { transform: translate(-51%, -49%) scale(1); }
+  to   { transform: translate(-49%, -51%) scale(1.08); }
+}
+@keyframes edge { 50% { opacity: 1; } }
+@keyframes breathe { 50% { transform: scale(1.1); opacity: .7; } }
+@keyframes ring {
+  0%   { transform: scale(.88); opacity: .75; }
+  100% { transform: scale(1.22); opacity: 0; }
+}
+@keyframes idleglow { 50% { text-shadow: 0 8px 38px #0009, 0 0 40px rgb(var(--edge) / .18); } }
+
+/* ---------- Smaller screens ---------- */
+@media (max-width: 800px) {
+  .artzone { width: min(46vw, 310px, 34vh); }
+  .clock { top: 60px; }
+}
+@media (max-height: 800px) {
+  .clock { top: 45px; }
+  .time { font-size: clamp(64px, 11vh, 92px); }
+  .artzone { top: calc(50% + 6vh); width: min(30vw, 360px, 34vh); }
+  .cover { border-radius: 18px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition-duration: .01ms !important;
+  }
+}
