@@ -394,6 +394,12 @@ html, body {
 .screen.mode-screensaver .chrome,
 .screen.mode-screensaver .loginbtn { display: none; }
 .screen.mode-screensaver { cursor: none; }
+/* Screen saver: macOS draws its own lock-screen clock at the top and the
+   password prompt at the bottom, so drop our clock and lift the player. */
+.screen.mode-screensaver .date,
+.screen.mode-screensaver .time { display: none; }
+.screen.mode-screensaver .clock { top: 25% !important; transform: none !important; }
+.screen.mode-screensaver .glassplayer { bottom: 16.5%; }
 
 /* Credit for the tempo data */
 .credit { position: absolute; right: 26px; bottom: 22px; font-size: 10px; letter-spacing: .08em; color: #e6eee266; text-decoration: none; }
