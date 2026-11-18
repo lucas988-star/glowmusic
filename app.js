@@ -504,14 +504,8 @@ const ctx = band.getContext('2d');
 const SAMPLES = 240;              // points around the edge
 const RADIUS = 40;                // corner rounding (matches .edge)
 const MARGIN = 12;                // same inset as .edge
-// Glow styles to choose from (?glow=lava|ribbon|neon|dream).
-const GLOW_STYLES = {
-  lava:   { base: 5, grow: 26, max: 38, blobs: 8, width: [0.012, 0.042], flow: 0.35, shadow: 14, gloss: 0.35, alpha: 0.85 },
-  ribbon: { base: 2, grow: 11, max: 16, blobs: 16, width: [0.005, 0.016], flow: 0.9, shadow: 10, gloss: 0.5, alpha: 0.9 },
-  neon:   { base: 2, grow: 20, max: 32, blobs: 5, width: [0.025, 0.06], flow: 0.2, shadow: 26, gloss: 0, alpha: 0.3, neon: true },
-  dream:  { base: 7, grow: 30, max: 38, blobs: 7, width: [0.02, 0.05], flow: 0.25, shadow: 24, gloss: 0, alpha: 0.75, blur: 7 },
-};
-const STYLE = GLOW_STYLES[new URLSearchParams(location.search).get('glow')] || GLOW_STYLES.lava;
+// Glow look: soft and blurry ("dream") with many small, quick ripples ("ribbon").
+const STYLE = { base: 5, grow: 22, max: 32, blobs: 14, width: [0.007, 0.022], flow: 0.9, speed: 1.4, shadow: 24, alpha: 0.8, blur: 6 };
 const MAX_DEPTH = STYLE.max;      // keep blobs out of the corners' centre
 const glow = {
   bpm: 0,                         // 0 = tempo unknown
@@ -625,7 +619,7 @@ function drawGlow(now) {
   const tempo = Math.min(1.4, Math.max(0.7, (glow.bpm || 110) / 110));
 
   // Blobs drift, grow and shrink — slow when calm, livelier when loud.
-  const pace = calm.matches ? 0 : dt * (0.25 + 1.6 * level) * tempo;
+  const pace = calm.matches ? 0 : dt * (0.25 + 1.6 * level) * tempo * STYLE.speed;
   for (const b of glow.blobs) {
     b.phase += pace * b.rate * 2;
     b.u = (b.u + b.v * pace * 3 + 1) % 1;
@@ -676,23 +670,6 @@ function drawGlow(now) {
   trace(outer); ctx.closePath();
   trace(inner); ctx.closePath();
   ctx.fill('evenodd');
-  if (STYLE.neon) { // bright tube along the blob outline
-    ctx.globalAlpha = strength;
-    ctx.strokeStyle = fill;
-    ctx.lineWidth = 2.5 + 1.5 * level;
-    ctx.beginPath();
-    trace(inner); ctx.closePath();
-    ctx.stroke();
-  }
-  if (STYLE.gloss) { // glossy edge on the blobs, like light on wax
-    ctx.shadowBlur = 0;
-    ctx.globalAlpha = STYLE.gloss * strength;
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    trace(inner); ctx.closePath();
-    ctx.stroke();
-  }
   ctx.restore();
 }
 
