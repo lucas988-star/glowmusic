@@ -399,7 +399,7 @@ html, body {
 .screen.mode-screensaver .date,
 .screen.mode-screensaver .time { display: none; }
 .screen.mode-screensaver .clock { top: 25% !important; transform: none !important; }
-.screen.mode-screensaver .glassplayer { bottom: 16.5%; }
+.screen.mode-screensaver .glassplayer { bottom: 15%; }
 
 /* Credit for the tempo data */
 .credit { position: absolute; right: 26px; bottom: 22px; font-size: 10px; letter-spacing: .08em; color: #e6eee266; text-decoration: none; }
