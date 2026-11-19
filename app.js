@@ -526,9 +526,12 @@ function newBlob() {
 for (let i = 0; i < STYLE.blobs; i++) glow.blobs.push(newBlob());
 if (STYLE.blur) band.style.filter = `blur(${STYLE.blur}px)`;
 
+// The glow is blurred anyway, so draw it at half resolution: 4x fewer pixels per frame = smoother.
+const GLOW_RES = 0.5;
 function resizeGlow() {
-  band.width = innerWidth;
-  band.height = innerHeight;
+  band.width = Math.round(innerWidth * GLOW_RES);
+  band.height = Math.round(innerHeight * GLOW_RES);
+  ctx.setTransform(GLOW_RES, 0, 0, GLOW_RES, 0, 0); // keep drawing in screen pixels
 }
 addEventListener('resize', resizeGlow);
 resizeGlow();
@@ -604,7 +607,7 @@ function lavaDepth(u, swell, now, w, h) {
 function drawGlow(now) {
   const dt = Math.min(0.1, (now - glow.last) / 1000);
   glow.last = now;
-  const w = band.width, h = band.height;
+  const w = innerWidth, h = innerHeight;
   const playing = playback.isPlaying && !calm.matches;
 
   // Loudness: rise fairly quickly (a drop/chorus kicks in), fall slowly.
@@ -662,7 +665,7 @@ function drawGlow(now) {
   ctx.save();
   ctx.globalAlpha = Math.min(1, STYLE.alpha + 0.2 * level + 0.3 * kick) * strength;
   ctx.shadowColor = hsl(glow.palette[0]);
-  ctx.shadowBlur = STYLE.shadow + 22 * level + 40 * kick;
+  ctx.shadowBlur = (STYLE.shadow + 22 * level + 40 * kick) * GLOW_RES; // shadows ignore the scale
   ctx.fillStyle = fill;
   ctx.beginPath();
   trace(outer); ctx.closePath();
@@ -688,7 +691,9 @@ function newFlake(w, h, anywhere) {
   return { x: Math.random() * w, y: anywhere ? Math.random() * h : -10, r: 1 + Math.random() * 2.6, vy: 25 + Math.random() * 45, sway: Math.random() * 6.3, swaySpeed: 0.5 + Math.random() };
 }
 function snowFrame(now) {
-  const w = (snowCanvas.width = innerWidth), h = (snowCanvas.height = innerHeight);
+  if (snowCanvas.width !== innerWidth || snowCanvas.height !== innerHeight) { snowCanvas.width = innerWidth; snowCanvas.height = innerHeight; }
+  const w = innerWidth, h = innerHeight;
+  snowCtx.clearRect(0, 0, w, h);
   const dt = Math.min(0.1, (now - snow.last) / 1000);
   snow.last = now;
   const want = Math.round((w * h) / 9000);
