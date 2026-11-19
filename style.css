@@ -394,6 +394,21 @@ html, body {
 }
 
 /* ---------- Smaller screens ---------- */
+/* PC and smaller: the earlier, more compact panels (big TVs keep the larger ones above) */
+@media (max-width: 1700px), (max-height: 1000px) {
+  .cap { font-size: 10px; margin-bottom: 14px; }
+  .upnext, .lyrics { width: min(340px, 29vw); padding: 22px 24px; }
+  .upnext { left: max(4.5%, calc(50% - 560px)); }
+  .lyrics { right: max(4.5%, calc(50% - 560px)); }
+  #queue, .lyrwin { height: min(292px, 34vh); }
+  .row { padding: 6px 8px; margin-bottom: 2px; border-radius: 13px; font-size: 13px; }
+  .row .small { font-size: 11px; }
+  .thumb { width: 34px; height: 34px; border-radius: 7px; }
+  .line { font-size: 17px; }
+  .line.active { font-size: 22px; }
+  .lyrlist.plain .line { font-size: 16px; }
+  .lyrnote { font-size: 13px; padding-top: calc(min(292px, 34vh) / 2 - 10px); }
+}
 @media (max-width: 960px) {
   .upnext { display: none; }
 }
@@ -408,7 +423,7 @@ html, body {
   .clock { top: 60px; }
   .glassplayer { width: calc(100% - 36px); bottom: 18px; padding: 11px 15px; }
   /* Narrow: lyrics take the cover's place */
-  .lyrics { right: auto; left: 50%; width: min(420px, calc(100% - 36px)); transform: translate(-50%, -50%) scale(.97); }
+  .lyrics { right: auto; left: 50%; width: min(340px, calc(100% - 36px)); transform: translate(-50%, -50%) scale(.97); }
   .screen.show-lyrics.is-playing .lyrics, .screen.show-lyrics.is-paused .lyrics { transform: translate(-50%, -50%) scale(1); }
   .screen.show-lyrics .artzone { opacity: 0; }
   .label { display: none; }

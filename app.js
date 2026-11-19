@@ -868,12 +868,23 @@ async function findLyrics(track) {
   const exact = await fetchLrclib('get', {
     track_name: track.name, artist_name: track.firstArtist, album_name: track.album, duration: seconds,
   });
-  if (exact && (exact.syncedLyrics || exact.plainLyrics || exact.instrumental)) return exact;
+  if (exact && exact.instrumental) return exact;
   const list = (await fetchLrclib('search', { track_name: track.name, artist_name: track.firstArtist })) || [];
   const close = list.filter((x) => Math.abs((x.duration || 0) - seconds) <= 4);
-  const pool = close.length ? close : list;
-  return pool.find((x) => x.syncedLyrics) || pool.find((x) => x.plainLyrics) || null;
+  const pool = [exact, ...(close.length ? close : list)].filter((x) => x && (x.syncedLyrics || x.plainLyrics));
+  // LRCLIB entries are sometimes vandalised with another song's words, so prefer lyrics that sing the title.
+  const real = pool.filter((x) => singsTitle(track.name, x.plainLyrics || x.syncedLyrics));
+  const best = real.length ? real : pool;
+  return best.find((x) => x.syncedLyrics) || best[0] || null;
 }
+
+const plainText = (t) => t.toLowerCase().normalize('NFD').replace(/[^\p{L}\p{N} ]/gu, ' ').replace(/\s+/g, ' ').trim();
+// "Winter Wonderland - 2020 Remaster (feat. X)" → "winter wonderland", then look for it in the lyrics.
+function singsTitle(title, lyrics) {
+  const core = plainText(title.replace(/\s+-\s.*$/, '').replace(/\(.*?\)|\[.*?\]/g, ''));
+  return core.length > 0 && plainText(lyrics || '').includes(core);
+}
+console.assert(singsTitle('Winter Wonderland - Remastered', 'Walking in a winter wonderland!') && !singsTitle('Winter Wonderland', 'Anh hẹn em pickleball'), 'singsTitle');
 
 function getLyrics(track) {
   if (!lyricsCache.has(track.id)) {
