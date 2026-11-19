@@ -741,14 +741,20 @@ async function loadTempo(track) {
 }
 
 let lastElapsed = '';
+let lastBarPx = -1;
 function frame(now) {
   requestAnimationFrame(frame); // the browser pauses this by itself when the page is hidden
   if (!els.screen.classList.contains('is-login')) drawGlow(now);
   if (!playback.id) return;
   const pos = currentPosition();
-  const pct = playback.durationMs ? (pos / playback.durationMs) * 100 : 0;
-  els.fill.style.width = `${pct}%`;
-  els.knob.style.left = `${pct}%`;
+  const pct = playback.durationMs ? Math.min(100, (pos / playback.durationMs) * 100) : 0;
+  // Only touch the bar when it has moved a whole pixel: every change repaints the glass player.
+  const px = Math.round((pct / 100) * els.fill.parentElement.clientWidth);
+  if (px !== lastBarPx) {
+    lastBarPx = px;
+    els.fill.style.width = `${pct}%`;
+    els.knob.style.left = `${pct}%`;
+  }
   const elapsed = formatTime(pos);
   if (elapsed !== lastElapsed) els.elapsed.textContent = lastElapsed = elapsed;
   if (prefs.lyrics) updateLyrics(pos);
