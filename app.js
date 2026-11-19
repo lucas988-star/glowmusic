@@ -40,9 +40,6 @@ const els = {
   screen: $('screen'),
   date: $('date'),
   time: $('time'),
-  info: $('trackinfo'),
-  title: $('title'),
-  artist: $('artist'),
   covers: [$('cover0'), $('cover1')],
   bgs: [$('bg0'), $('bg1')],
   ptitle: $('ptitle'),
@@ -265,7 +262,7 @@ async function poll() {
         if (data.is_playing) lastPlayingAt = Date.now();
         if (!data.is_playing && Date.now() - lastPlayingAt > PAUSED_TO_IDLE_MS) showIdle();
         else showTrack(data);
-        delay = data.is_playing ? POLL_PLAYING_MS : POLL_IDLE_MS;
+        delay = POLL_PLAYING_MS; // also while paused, so play/pause from the keyboard shows up fast
         // Check again right when the song should end, so the next one appears quickly.
         if (data.is_playing && data.item.duration_ms) {
           delay = Math.min(delay, Math.max(500, data.item.duration_ms - data.progress_ms + 400));
@@ -285,7 +282,7 @@ async function poll() {
   }
   polling = false;
   // Hidden page: check rarely (some wallpaper apps report "hidden" even when you can see it).
-  pollTimer = setTimeout(poll, document.hidden ? Math.max(delay, 30000) : delay);
+  pollTimer = setTimeout(poll, document.hidden ? Math.max(delay, 10000) : delay);
 }
 
 function stopPolling() {
@@ -336,6 +333,8 @@ function showIdle() {
   view.track = null;
   playback.id = null;
   playback.isPlaying = false;
+  els.playBtn.classList.remove('playing');
+  setSnow(false);
 }
 
 function showTrack(data) {
@@ -368,6 +367,7 @@ function showTrack(data) {
     const sub = track.album ? `${track.artist}  ·  ${track.album}` : track.artist;
     setTrackText(track.name, sub);
     songChanged();
+    setSnow(isChristmas(track));
     loadTempo(track);
     els.total.textContent = formatTime(track.durationMs);
     if (prefs.upnext) loadQueue();
@@ -376,17 +376,9 @@ function showTrack(data) {
   setArt(images && images[0] ? images[0].url : null);
 }
 
-let textTimer = null;
 function setTrackText(title, subtitle) {
-  clearTimeout(textTimer);
-  const apply = () => {
-    els.title.textContent = els.ptitle.textContent = title;
-    els.artist.textContent = els.partist.textContent = subtitle;
-    els.info.classList.remove('fade');
-  };
-  if (!view.hasText) { view.hasText = true; apply(); return; }
-  els.info.classList.add('fade');
-  textTimer = setTimeout(apply, 350);
+  els.ptitle.textContent = title;
+  els.partist.textContent = subtitle;
 }
 
 // Crossfade: load the new image into the hidden layer, then fade it in on top.
@@ -593,15 +585,20 @@ function lavaDepth(u, swell, now, w, h) {
     d += swell * b.cur * Math.exp(-x * x * 0.5);
   }
   const since = (now - glow.switchAt) / 1000;
-  if (since < 3) { // song change: two blobs race from the top centre down both sides
+  let cap = MAX_DEPTH;
+  if (since < 3.5) { // song change: two big waves race from the top centre all the way round and meet at the bottom
     const W = w - 2 * MARGIN - 2 * RADIUS, H = h - 2 * MARGIN - 2 * RADIUS;
     const top = (W / 2) / (2 * (W + H) + 2 * Math.PI * RADIUS);
+    const run = Math.min(0.5, since * 0.32);
+    const fade = Math.exp(-since * 0.7);
     for (const dir of [1, -1]) {
-      const x = circ(u, top + dir * since * 0.3) / 0.035;
-      d += 30 * Math.exp(-since * 0.9) * Math.exp(-x * x * 0.5);
+      const x = circ(u, top + dir * run) / 0.05;
+      d += 55 * fade * Math.exp(-x * x * 0.5);
     }
+    d += 10 * Math.exp(-since * 2); // whole frame swells for a moment
+    cap += 30 * fade;
   }
-  return Math.min(MAX_DEPTH, d);
+  return Math.min(cap, d);
 }
 
 function drawGlow(now) {
@@ -636,7 +633,8 @@ function drawGlow(now) {
     let dh = ((t[0] - c[0] + 540) % 360) - 180;                   // shortest way round the colour wheel
     c[0] = (c[0] + dh * k + 360) % 360; c[1] += (t[1] - c[1]) * k; c[2] += (t[2] - c[2]) * k;
   });
-  glow.flow += pace * STYLE.flow;
+  const kick = Math.exp(-Math.max(0, now - glow.switchAt) / 700); // 1 right at a song change, fades out
+  glow.flow += pace * STYLE.flow + dt * 5 * kick;                  // colours spin round on a new song
   glowEls.forEach((el) => el.style.setProperty('--pulse', Math.min(1, 0.25 + 0.6 * level).toFixed(3)));
 
   // Lava shape: the ring between the frame and the wobbly inner edge.
@@ -662,15 +660,54 @@ function drawGlow(now) {
 
   ctx.clearRect(0, 0, w, h);
   ctx.save();
-  ctx.globalAlpha = Math.min(1, STYLE.alpha + 0.2 * level) * strength;
+  ctx.globalAlpha = Math.min(1, STYLE.alpha + 0.2 * level + 0.3 * kick) * strength;
   ctx.shadowColor = hsl(glow.palette[0]);
-  ctx.shadowBlur = STYLE.shadow + 22 * level;
+  ctx.shadowBlur = STYLE.shadow + 22 * level + 40 * kick;
   ctx.fillStyle = fill;
   ctx.beginPath();
   trace(outer); ctx.closePath();
   trace(inner); ctx.closePath();
   ctx.fill('evenodd');
   ctx.restore();
+}
+
+// ---------------------------------------------------------------- Christmas snow
+const XMAS = /christmas|xmas|x-mas|jingle|santa|sleigh|mistletoe|navidad|let it snow|winter wonderland|rudolph|reindeer|silent night|holy night|deck the hall|frosty|snowman|little drummer|feliz navidad|\bnoel\b|\bjul\b|julen|julafton|tomte|god jul|nu tändas/i;
+function isChristmas(t) { return XMAS.test(`${t.name} ${t.album}`); }
+
+const snowCanvas = $('snow');
+const snowCtx = snowCanvas.getContext('2d');
+const snow = { on: false, flakes: [], last: 0, running: false };
+function setSnow(on) {
+  on = on && !calm.matches;
+  snowCanvas.classList.toggle('on', on);
+  snow.on = on;
+  if (on && !snow.running) { snow.running = true; snow.last = performance.now(); requestAnimationFrame(snowFrame); }
+}
+function newFlake(w, h, anywhere) {
+  return { x: Math.random() * w, y: anywhere ? Math.random() * h : -10, r: 1 + Math.random() * 2.6, vy: 25 + Math.random() * 45, sway: Math.random() * 6.3, swaySpeed: 0.5 + Math.random() };
+}
+function snowFrame(now) {
+  const w = (snowCanvas.width = innerWidth), h = (snowCanvas.height = innerHeight);
+  const dt = Math.min(0.1, (now - snow.last) / 1000);
+  snow.last = now;
+  const want = Math.round((w * h) / 9000);
+  while (snow.flakes.length < want) snow.flakes.push(newFlake(w, h, true));
+  snow.flakes.length = Math.min(snow.flakes.length, want);
+  snowCtx.fillStyle = '#fff';
+  for (const f of snow.flakes) {
+    f.y += f.vy * dt;
+    f.sway += f.swaySpeed * dt;
+    f.x += Math.sin(f.sway) * 18 * dt;
+    if (f.y > h + 10) Object.assign(f, newFlake(w, h, false));
+    snowCtx.globalAlpha = 0.35 + f.r / 5;
+    snowCtx.beginPath();
+    snowCtx.arc(f.x, f.y, f.r, 0, Math.PI * 2);
+    snowCtx.fill();
+  }
+  // keep falling until the fade-out is done, then stop drawing
+  if (snow.on || getComputedStyle(snowCanvas).opacity > 0.01) requestAnimationFrame(snowFrame);
+  else { snow.running = false; snowCtx.clearRect(0, 0, w, h); }
 }
 
 // Song tempo + energy from ReccoBeats (free, no key, uses the Spotify track id). Cached per song.

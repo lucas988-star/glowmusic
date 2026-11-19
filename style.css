@@ -75,6 +75,8 @@ html, body {
 }
 /* Wavy glow band + sparkles, drawn by app.js (drawGlow). Half resolution, blurred by CSS. */
 .glowband { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: screen; }
+.snow { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; opacity: 0; transition: opacity 2s; }
+.snow.on { opacity: .85; }
 .screen.is-idle .edge,
 .screen.is-login .edge { opacity: .5; }
 
@@ -106,36 +108,11 @@ html, body {
   background-clip: text;
   filter: drop-shadow(0 6px 30px rgb(0 0 0 / .45)) drop-shadow(0 0 18px color-mix(in srgb, var(--accent) 22%, transparent));
 }
-.trackinfo {
-  transition: opacity .35s var(--ease);
-  padding: 0 24px;
-}
-.trackinfo.fade { opacity: 0; }
-.tracktop {
-  font-size: 19px;
-  font-weight: 500;
-  letter-spacing: .01em;
-  margin-top: 8px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.artist {
-  font-size: 13px;
-  color: #e2e8dfc9;
-  margin-top: 5px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 /* Idle / login: clock alone, centred */
 .screen.is-idle .clock,
 .screen.is-boot .clock { top: 50%; transform: translateY(-60%); }
 .screen.is-login .clock { top: 12%; }
-.screen.is-idle .trackinfo,
-.screen.is-login .trackinfo,
-.screen.is-boot .trackinfo { opacity: 0; }
 
 /* ---------- Album art ---------- */
 .artzone {
@@ -324,42 +301,43 @@ html, body {
 .screen.show-lyrics.is-playing .lyrics, .screen.show-lyrics.is-paused .lyrics {
   opacity: 1; visibility: visible; transform: translateY(-50%) scale(1);
 }
-.cap { font-size: 10px; letter-spacing: .2em; color: #d8e3d9aa; margin-bottom: 14px; }
+.cap { font-size: 11px; letter-spacing: .2em; color: #d8e3d9aa; margin-bottom: 16px; }
 
 /* Both panels: same glass, same size, pulled toward the cover on wide screens */
 .upnext, .lyrics {
-  width: min(340px, 29vw);
-  padding: 22px 24px;
+  width: min(420px, 31vw);
+  padding: 24px 26px;
   background: rgba(12, 18, 15, .6);
   border: 1px solid #ffffff40;
 }
-.upnext { left: max(4.5%, calc(50% - 560px)); }
-.lyrics { right: max(4.5%, calc(50% - 560px)); text-align: center; }
-#queue { height: min(292px, 34vh); overflow: hidden; -webkit-mask-image: linear-gradient(#000 88%, transparent); mask-image: linear-gradient(#000 88%, transparent); } /* same height as the lyrics window */
-.row { display: flex; align-items: center; gap: 12px; padding: 6px 8px; margin-bottom: 2px; border-radius: 13px; font-size: 13px; border: 1px solid transparent; }
+.upnext { left: max(3%, calc(50% - 640px)); }
+.lyrics { right: max(3%, calc(50% - 640px)); text-align: center; }
+#queue { height: min(370px, 42vh); overflow: hidden; -webkit-mask-image: linear-gradient(#000 88%, transparent); mask-image: linear-gradient(#000 88%, transparent); } /* same height as the lyrics window */
+.row { display: flex; align-items: center; gap: 12px; padding: 8px 10px; margin-bottom: 3px; border-radius: 15px; font-size: 15px; border: 1px solid transparent; }
 .row[role=button] { cursor: pointer; transition: background .2s, transform .2s var(--ease), border-color .2s; }
 .row[role=button]:hover, .row[role=button]:focus-visible { background: #ffffff16; border-color: #ffffff22; transform: translateX(4px); outline: none; }
 .row[role=button]:active { transform: translateX(4px) scale(.98); }
 .row.current { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: #caffd633; }
 .row > div { min-width: 0; }
-.thumb { flex: none; width: 34px; height: 34px; object-fit: cover; border-radius: 7px; background: #ffffff18; }
+.thumb { flex: none; width: 44px; height: 44px; object-fit: cover; border-radius: 9px; background: #ffffff18; }
 .song, .row .small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .song { font-weight: 550; }
+.row .small { font-size: 13px; }
 
 .lyrwin {
-  height: min(292px, 34vh);
+  height: min(370px, 42vh);
   overflow: hidden;
   -webkit-mask-image: linear-gradient(transparent, #000 22%, #000 78%, transparent);
   mask-image: linear-gradient(transparent, #000 22%, #000 78%, transparent);
 }
 .lyrlist { transition: transform .6s var(--ease); will-change: transform; }
-.line { font-size: 17px; color: #c4ccc5; line-height: 1.6; padding: 3px 0; opacity: .55; transition: opacity .4s, color .4s, font-size .3s; }
+.line { font-size: 20px; color: #c4ccc5; line-height: 1.6; padding: 3px 0; opacity: .55; transition: opacity .4s, color .4s, font-size .3s; }
 .line.active {
-  font-size: 22px; font-weight: 650; color: #fff; opacity: 1;
+  font-size: 26px; font-weight: 650; color: #fff; opacity: 1;
   text-shadow: 0 0 25px color-mix(in srgb, var(--accent) 60%, transparent);
 }
-.lyrlist.plain .line { opacity: .85; font-size: 16px; }
-.lyrnote { font-size: 13px; color: #c4ccc5aa; padding-top: calc(min(292px, 34vh) / 2 - 10px); }
+.lyrlist.plain .line { opacity: .85; font-size: 19px; }
+.lyrnote { font-size: 15px; color: #c4ccc5aa; padding-top: calc(min(370px, 42vh) / 2 - 10px); }
 
 /* ---------- Toggle buttons (top right) ---------- */
 .toggles { position: absolute; z-index: 4; top: 24px; right: 26px; display: flex; gap: 8px; }
@@ -398,7 +376,6 @@ html, body {
    password prompt at the bottom, so drop our clock and lift the player. */
 .screen.mode-screensaver .date,
 .screen.mode-screensaver .time { display: none; }
-.screen.mode-screensaver .clock { top: 25% !important; transform: none !important; }
 .screen.mode-screensaver .glassplayer { bottom: 13.5%; }
 
 /* Credit for the tempo data */
@@ -431,7 +408,7 @@ html, body {
   .clock { top: 60px; }
   .glassplayer { width: calc(100% - 36px); bottom: 18px; padding: 11px 15px; }
   /* Narrow: lyrics take the cover's place */
-  .lyrics { right: auto; left: 50%; width: min(340px, calc(100% - 36px)); transform: translate(-50%, -50%) scale(.97); }
+  .lyrics { right: auto; left: 50%; width: min(420px, calc(100% - 36px)); transform: translate(-50%, -50%) scale(.97); }
   .screen.show-lyrics.is-playing .lyrics, .screen.show-lyrics.is-paused .lyrics { transform: translate(-50%, -50%) scale(1); }
   .screen.show-lyrics .artzone { opacity: 0; }
   .label { display: none; }
